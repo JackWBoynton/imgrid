@@ -101,6 +101,7 @@ inline ImRect GetItemRectInternal() {
   size.y = ceil(size.y / ctx.Style.GridSpacing) * ctx.Style.GridSpacing;
   auto dummy_size = size - ImVec2(rect.GetWidth(), rect.GetHeight());
   entry.DummySize = dummy_size;
+  entry.Rect.Expand(dummy_size);
   return rect;
 }
 
@@ -597,7 +598,7 @@ void DrawEntryPreview(ImGridContext &ctx, const ImGridEntry &entry) {
   entry.Origin = {entry.GridData.Position.x * ctx.Style.GridSpacing,
                   entry.GridData.Position.y * ctx.Style.GridSpacing};
 
-  ImGui::SetCursorPos(entry.Origin + GImGrid->Panning);
+  ImGui::SetCursorPos(entry.Origin + GImGrid->Panning + entry.DummySize / 2);
   // ImGui::SetCursorPos(
   //    ImVec2(entry.GridData.Position.x, entry.GridData.Position.y) +
   //    GImGrid->Panning);
