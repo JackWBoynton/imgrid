@@ -88,29 +88,29 @@ void GridNodeBoundFix(ImGridEngine &ctx, ImGridEntryData *entry,
     pre.h = entry->Position.h;
   }
 
-  if (entry->MaxW >= 0)
+  if (entry->MaxW > 0)
     entry->Position.w = IM_MIN(entry->MaxW, entry->Position.w);
-  if (entry->MaxH >= 0)
+  if (entry->MaxH > 0)
     entry->Position.h = IM_MIN(entry->MaxH, entry->Position.h);
-  if (entry->MinW >= 0 && entry->MinW <= ctx.Column)
+  if (entry->MinW > 0 && entry->MinW <= ctx.Column)
     entry->Position.w = IM_MAX(entry->MinW, entry->Position.w);
-  if (entry->MinH >= 0)
+  if (entry->MinH > 0)
     entry->Position.h = IM_MAX(entry->MinH, entry->Position.h);
 
   const bool save_orig = (entry->Position.x >= 0 ? entry->Position.x : 0) +
                              (entry->Position.w >= 0 ? entry->Position.w : 1) >
                          ctx.Column;
-  if (save_orig && ctx.Column < 120 && !ctx.InColumnResize &&
-      GridFindCacheLayout(ctx, entry, 120) == -1) {
+  if (save_orig && ctx.Column < 12 && !ctx.InColumnResize &&
+      GridFindCacheLayout(ctx, entry, 12) == -1) {
     ImGridEntryData copy = *entry;
     if (copy.AutoPosition || copy.Position.x == -1) {
       copy.Position.x = -1;
       copy.Position.y = -1;
     } else {
-      copy.Position.x = IM_MIN(copy.Position.x, 120 - 1);
+      copy.Position.x = IM_MIN(copy.Position.x, 12 - 1);
     }
-    copy.Position.w = IM_MIN(copy.Position.w != -1 ? copy.Position.w : 1, 120);
-    GridCacheOneLayout(ctx, entry, 120);
+    copy.Position.w = IM_MIN(copy.Position.w != -1 ? copy.Position.w : 1, 12);
+    GridCacheOneLayout(ctx, entry, 12);
   }
 
   if (entry->Position.w > ctx.Column)
@@ -140,7 +140,7 @@ void GridNodeBoundFix(ImGridEngine &ctx, ImGridEntryData *entry,
       entry->Position.y = ctx.MaxRow - entry->Position.h;
   }
 
-  if (entry->Position == pre)
+  if (entry->Position != pre)
     entry->Dirty = true;
 }
 
@@ -157,6 +157,10 @@ ImGridEntryData *GridPrepareEntry(ImGridEngine &ctx, ImGridEntryData *entry,
   if (!(entry->Position.x < 119 && entry->Position.y < 119)) {
     IM_ASSERT(false);
   }
+
+  if (entry->Position.h == -1 || entry->Position.w == -1)
+    IM_ASSERT(false);
+
   if (entry->Position.x == -1 || entry->Position.y == -1)
     entry->AutoPosition = true;
 
@@ -364,13 +368,9 @@ ImGridEntryData *GridCopyPosition(ImGridEntryData *a, ImGridEntryData *b,
     a->Position.h = b->Position.h;
 
   if (include_minmax) {
-    if (b->MinW != -1)
       a->MinW = b->MinW;
-    if (b->MinH != -1)
       a->MinH = b->MinH;
-    if (b->MaxW != -1)
       a->MaxW = b->MaxW;
-    if (b->MaxH != -1)
       a->MaxH = b->MaxH;
   }
   return a;
@@ -506,13 +506,13 @@ bool GridUseEntireRowArea(ImGridEngine &ctx, ImGridEntryData *entry,
 
 bool GridMoveNode(ImGridEngine &ctx, ImGridEntryData *entry,
                   ImGridMoveOptions &opts) {
-
   if (entry == NULL)
     return false;
 
   if (!(entry->Position.x < 119 && entry->Position.y < 119)) {
     IM_ASSERT(false);
   }
+
   // might be wrong...
   // bool was_undefined_pack;
 
@@ -554,7 +554,6 @@ bool GridMoveNode(ImGridEngine &ctx, ImGridEntryData *entry,
   }
   */
     if (collide != NULL) {
-      printf("ASDFASDF\n");
       need_to_move =
           !GridFixCollisions(ctx, entry, new_node.Position, collide, opts);
     } else {
@@ -622,7 +621,6 @@ bool GridFixCollisions(ImGridEngine &ctx, ImGridEntryData *entry,
                        entry) == NULL)))) {
       entry->SkipDown = entry->SkipDown || new_position.y > entry->Position.y;
       ImGridMoveOptions opt = new_opts;
-      printf("ASDFASDF\n");
       opt.Position = {new_position.x, collide->Position.y + collide->Position.h,
                       new_position.w, new_position.h};
       moved = GridMoveNode(ctx, entry, opt);
@@ -727,10 +725,10 @@ bool GridChangedPosConstrain(ImGridEntryData *entry, ImGridPosition &p) {
 
   // check constrained w,h
   if (entry->MaxW) {
-    p.w = IM_MAX(p.w, entry->MaxW);
+    p.w = IM_MIN(p.w, entry->MaxW);
   }
   if (entry->MaxH) {
-    p.h = IM_MAX(p.h, entry->MaxH);
+    p.h = IM_MIN(p.h, entry->MaxH);
   }
   if (entry->MinW) {
     p.w = IM_MAX(p.w, entry->MinW);
@@ -755,7 +753,7 @@ bool GridEntryMoveCheck(ImGridEngine &ctx, ImGridEntryData *entry,
     return false;
   opts.Pack = true;
 
-  if (!ctx.MaxRow)
+  if (ctx.MaxRow <= 0)
     return GridMoveNode(ctx, entry, opts);
 
   ImGridEntryData *cloned_node = NULL;

@@ -120,8 +120,8 @@ struct ImGridOptions {
   ImGridOptions()
       : AcceptWidgets(true), AlwaysShowResizeHandle(false), Animate(false),
         Auto(true), CellHeight({ImGridCellHeightMode_Auto, 10, 100}),
-        Column({false, 120}), DisableDrag(false), DisableResize(false),
-        Float(false), Margin(10), MaxRow(0), MinRow(0), SizeToContent(true) {}
+        Column({true, 24}), DisableDrag(false), DisableResize(false),
+        Float(false), Margin(10), MaxRow(-1), MinRow(0), SizeToContent(false) {}
 };
 
 struct ImGridEngine {
@@ -150,7 +150,7 @@ struct ImGridEngine {
   ImGridContext *ParentContext;
 
   ImGridEngine(ImGridOptions opts = {}) {
-    Column = opts.Column.Auto ? 120 : opts.Column.Columns;
+    Column = opts.Column.Auto ? 12 : opts.Column.Columns;
     MaxRow = opts.MaxRow;
     Float = opts.Float;
     Entries = opts.InitialEntries;
@@ -161,7 +161,7 @@ struct ImGridEngine {
     HasLocked = false;
     Loading = false;
     ExtraDragRow = 0;
-    IsAutoCellHeight = false;
+    IsAutoCellHeight = true;
     LastMovingCellHeight = 0;
     LastMovingCellWidth = 0;
   }

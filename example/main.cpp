@@ -15,9 +15,14 @@
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 #include "imgui.h"
+#include "imgui_internal.h"
+
+#include "implot.h"
+#include "implot_demo.cpp"
 
 #include "imgrid.h"
 
+#include <map>
 #include <stdio.h>
 #define GL_SILENCE_DEPRECATION
 #if defined(IMGUI_IMPL_OPENGL_ES2)
@@ -44,6 +49,174 @@
 
 static void glfw_error_callback(int error, const char *description) {
   fprintf(stderr, "GLFW Error %d: %s\n", error, description);
+}
+
+struct GuageColorMap {
+  std::map<float, ImU32> Map;
+
+  static bool Render();
+
+  GuageColorMap(std::initializer_list<std::pair<const float, ImU32>> init)
+      : Map(init) {}
+  GuageColorMap() = default;
+
+  static GuageColorMap *Editing;
+};
+
+GuageColorMap *GuageColorMap::Editing = nullptr;
+
+bool GuageColorMap::Render() {
+  bool set = false;
+  if (ImGui::BeginPopup("ColorMap Popup")) {
+    printf("Asdfasdf\n");
+
+    if (GuageColorMap::Editing == nullptr) {
+      ImGui::EndPopup();
+      return false;
+    }
+
+    for (auto &[key, color] : GuageColorMap::Editing->Map) {
+      ImGui::PushID(key);
+      ImGui::PushItemWidth(100);
+      // Color pickers do not take ImU32 so we need to convert them to vec4 and
+      // back
+      auto color_vec4 = ImColor(color).Value;
+      if (ImGui::ColorPicker3("Color", &color_vec4.x)) {
+        color = ImColor(color_vec4);
+      }
+      ImGui::PopItemWidth();
+      ImGui::SameLine();
+      ImGui::InputFloat("Value", (float *)&key);
+      ImGui::PopID();
+    }
+
+    if (ImGui::Button("Confirm")) {
+      set = true;
+      ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+  }
+
+  return set;
+}
+
+bool SimpleGuage(const char *label, float value, float min, float max,
+                 GuageColorMap &colorMap, const char *format = "%.2f",
+                 float radius = 50, float thickness = 10,
+                 float start_angle = 0.75f, float end_angle = 2.25f,
+                 float threshold_indicator_div = 6.0f) {
+  ImGuiWindow *window = ImGui::GetCurrentWindow();
+  if (window->SkipItems)
+    return false;
+
+  ImGuiContext &g = *GImGui;
+  const ImGuiStyle &style = g.Style;
+  const ImGuiID id = window->GetID(label);
+  ImVec2 label_size = ImGui::CalcTextSize(label, nullptr, true);
+
+  const ImVec2 pos = window->DC.CursorPos;
+
+  // bool needs_wrap = label_size.x > radius * 2 - style.FramePadding.x * 2;
+
+  // if (needs_wrap) {
+  //   label_size.y += (int)(label_size.x / (radius * 2)) * CalcTextSize("A").y;
+  // }
+
+  const ImRect total_bb(pos,
+                        pos + ImVec2(radius * 2, radius * 2) +
+                            ImVec2(0, label_size.y + style.FramePadding.y) +
+                            style.FramePadding * 2);
+  ImGui::ItemSize(total_bb, style.FramePadding.y);
+  if (!ImGui::ItemAdd(total_bb, id)) {
+    return false;
+  }
+
+  bool hovered, held;
+  bool pressed = ImGui::ButtonBehavior(total_bb, id, &hovered, &held,
+                                       ImGuiButtonFlags_MouseButtonRight);
+  if (pressed) {
+    ImGui::MarkItemEdited(id);
+    GuageColorMap::Editing = &colorMap;
+    ImGui::OpenPopup("ColorMap Popup", ImGuiPopupFlags_AnyPopup);
+  }
+
+  auto label_pos =
+      total_bb.GetTL() +
+      ImVec2((total_bb.GetWidth() - label_size.x) / 2, style.FramePadding.y);
+
+  // add the label above the guage in the center
+  window->DrawList->AddText(label_pos, ImColor(style.Colors[ImGuiCol_Text]),
+                            label);
+  const auto center =
+      total_bb.GetCenter() + ImVec2(0, label_size.y + style.ItemInnerSpacing.y);
+
+  // lambda to convert from value to angle ( corrected for the start of 0.75 and
+  // end of 2.25 )
+  auto lerper = [&](float val) {
+    return start_angle * IM_PI +
+           (val - min) / (max - min) * (end_angle - start_angle) * IM_PI;
+  };
+
+  auto color_ring_thickness = thickness / threshold_indicator_div;
+  auto color_ring_radius = radius;
+
+  // add the colors
+  float current_angle = start_angle * IM_PI;
+  for (const auto &[key, color] : colorMap.Map) {
+    float next_angle = lerper(key);
+    window->DrawList->PathClear();
+    window->DrawList->PathArcTo(center, color_ring_radius, current_angle,
+                                next_angle);
+    window->DrawList->PathStroke(color, ImDrawFlags_None, color_ring_thickness);
+    current_angle = next_angle;
+  }
+
+  // add the background of the guage
+  auto value_ring_radius =
+      radius - color_ring_thickness * 3.0f - radius / (16.0f);
+  window->DrawList->PathClear();
+  window->DrawList->PathArcTo(center, value_ring_radius, start_angle * IM_PI,
+                              end_angle * IM_PI);
+  window->DrawList->PathStroke(ImColor(style.Colors[ImGuiCol_MenuBarBg]),
+                               ImDrawFlags_None, thickness);
+
+  // add the current values bar of the correct color and angle
+  float current_angle_value =
+      std::max(start_angle * IM_PI, std::min(end_angle * IM_PI, lerper(value)));
+  window->DrawList->PathClear();
+  window->DrawList->PathArcTo(center, value_ring_radius, start_angle * IM_PI,
+                              current_angle_value);
+  ImU32 value_color = 0;
+  ImU32 last_color = 0;
+  for (const auto &[key, color] : colorMap.Map) {
+    if (value <= key) {
+      value_color = color;
+      break;
+    }
+    last_color = color;
+  }
+  if (value_color == 0) {
+    value_color = last_color;
+  }
+  window->DrawList->PathStroke(value_color, ImDrawFlags_None, thickness);
+
+  // add a white line at the end of the value to make it look like a needle
+  auto value_ring_thickness = thickness + 1.0f;
+  window->DrawList->PathClear();
+  window->DrawList->PathArcTo(center, value_ring_radius,
+                              current_angle_value - 0.01f * IM_PI / 2,
+                              current_angle_value + 0.01f * IM_PI / 2);
+  window->DrawList->PathStroke(ImColor(ImVec4(1, 1, 1, 1)), ImDrawFlags_None,
+                               value_ring_thickness);
+
+  // add the value in the middle of the guage
+  char buffer[64];
+  snprintf(buffer, sizeof(buffer), format, value);
+  const ImVec2 value_size = ImGui::CalcTextSize(buffer, nullptr, true);
+  window->DrawList->AddText(center - value_size / 2, value_color, buffer);
+
+  return true;
 }
 
 // Main code
@@ -86,6 +259,7 @@ int main(int, char **) {
   // Setup Dear ImGui context
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
+  ImPlot::CreateContext();
 
   ImGrid::CreateContext();
 
@@ -100,6 +274,13 @@ int main(int, char **) {
   // Setup Dear ImGui style
   ImGui::StyleColorsDark();
   // ImGui::StyleColorsLight();
+  //
+
+  ImFontConfig font_cfg;
+  font_cfg.SizePixels = 26.0f;
+  auto *default_font = io.Fonts->AddFontDefault();
+  (void)default_font;
+  auto *big_font = io.Fonts->AddFontDefault(&font_cfg);
 
   // Setup Platform/Renderer backends
   ImGui_ImplGlfw_InitForOpenGL(window, true);
@@ -168,30 +349,105 @@ int main(int, char **) {
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
+    static GuageColorMap colorMap = {{50, IM_COL32(0, 153, 0, 255)},
+                                     {75, IM_COL32(255, 255, 0, 255)},
+                                     {100, IM_COL32(255, 0, 0, 255)}};
+
     ImGui::SetNextWindowSize(ImVec2(400, 400), ImGuiCond_FirstUseEver);
     [[maybe_unused]] static float f = 0;
+    static float radius = 100.0f;
+    static float thickness = 10.0f;
     ImGrid::PushStyleVar(ImGridStyleVar_GridSpacing, 70.0f);
     if (ImGui::Begin("Grid")) {
+
       ImGrid::BeginGrid();
       ImGrid::BeginEntry(0);
       {
         ImGrid::BeginEntryTitleBar();
         ImGui::Text("Entry 0");
         ImGrid::EndEntryTitleBar();
-        ImGui::SetNextItemWidth(60.0f);
-        ImGui::SliderFloat("float", &f, 0.0f, 1.0f);
-      }
-      ImGrid::EndEntry();
+        ImGui::SetNextItemWidth(100);
+        ImGui::SliderFloat("float", &f, 0.0f, 100.0f);
+        ImGui::SetNextItemWidth(100);
+        ImGui::SliderFloat("radius", &radius, 0.0f, 300.0f);
+        ImGui::SetNextItemWidth(100);
+        ImGui::SliderFloat("thickness", &thickness, 0.0f, 50.0f);
 
-      ImGrid::BeginEntry(1);
-      {
-        ImGrid::BeginEntryTitleBar();
-        ImGui::Text("Entry 1");
-        ImGrid::EndEntryTitleBar();
-        ImGui::Text("Entry 1 Content");
+        SimpleGuage("Guage", f, 0.0f, 100.0f, colorMap, "%.2f", radius,
+                    thickness);
       }
       ImGrid::EndEntry();
+      int i = 1;
+      for (i = 1; i < 3; i++) {
+        ImGrid::BeginEntry(i);
+        {
+          ImGrid::BeginEntryTitleBar();
+          ImGui::Text("Entry %d", i);
+          ImGrid::EndEntryTitleBar();
+          ImGui::Text("Entry %d content", i);
+
+          ImGui::SetNextItemWidth(100);
+          ImGui::SliderFloat("float", &f, 0.0f, 100.0f);
+          ImGui::SetNextItemWidth(100);
+          ImGui::SliderFloat("radius", &radius, 0.0f, 300.0f);
+          ImGui::SetNextItemWidth(100);
+          ImGui::SliderFloat("thickness", &thickness, 0.0f, 50.0f);
+
+          SimpleGuage("Guage", f, 0.0f, 100.0f, colorMap, "%.2f", radius,
+                      thickness);
+        }
+        ImGrid::EndEntry();
+      }
+
+      for (; i < 5; i++) {
+        ImGrid::BeginEntry(i);
+        {
+          ImGrid::BeginEntryTitleBar();
+          ImGui::Text("Entry %d", i);
+          ImGrid::EndEntryTitleBar();
+          ImGui::Text("Entry %d content", i);
+
+          ImPlot::PushStyleVar(ImPlotStyleVar_PlotDefaultSize,
+                               ImVec2(300, 300));
+          ImPlot::Demo_LinePlots();
+          ImPlot::PopStyleVar();
+        }
+        ImGrid::EndEntry();
+      }
+
+      for (; i < 6; i++) {
+        ImGrid::BeginEntry(i);
+        {
+          ImGrid::BeginEntryTitleBar();
+          ImGui::Text("Entry %d", i);
+          ImGrid::EndEntryTitleBar();
+          ImGui::Text("Entry %d content", i);
+
+          ImPlot::PushStyleVar(ImPlotStyleVar_PlotDefaultSize,
+                               ImVec2(400, 200));
+          ImPlot::Demo_RealtimePlots();
+          ImPlot::PopStyleVar();
+        }
+        ImGrid::EndEntry();
+      }
+      for (; i < 8; i++) {
+        ImGrid::BeginEntry(i);
+        {
+          ImGrid::BeginEntryTitleBar();
+          ImGui::Text("Entry %d", i);
+          ImGrid::EndEntryTitleBar();
+          ImGui::Text("Entry %d content", i);
+
+          ImGui::PushFont(big_font);
+          ImGui::Text("%f", f);
+          ImGui::PopFont();
+        }
+        ImGrid::EndEntry();
+      }
+
       ImGrid::EndGrid();
+      GuageColorMap::Render(); // this will render the color map popup (only
+                               // opened if a guage is clicked)
     }
     ImGui::End();
     ImGrid::PopStyleVar();

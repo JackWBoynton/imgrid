@@ -110,6 +110,7 @@ struct ImGridEntry {
   int Id;
   ImVec2 Origin;
   ImRect Rect;
+  ImVec2 DummySize;
   ImRect TitleBarContentRect;
 
   ImGridEntryData GridData;
