@@ -36,6 +36,8 @@ enum ImGridClickInteractionType_ {
   ImGridClickInteractionType_Entry = 1 << 1,
   ImGridClickInteractionType_ImGuiItem = 1 << 2,
   ImGridClickInteractionType_Resizing = 1 << 3,
+  ImGridClickInteractionType_BoxSelection = 1 << 4,
+  ImGridClickInteractionType_Panning = 1 << 5,
 };
 
 // [SECTION] internal data structures
@@ -103,6 +105,10 @@ struct ImGridClickInteractionState {
 
   ImGridClickInteractionType Type;
 
+  struct {
+    ImRect Rect; // Coordinates in grid space
+  } BoxSelector;
+
   ImGridClickInteractionState() : Type(ImGridClickInteractionType_None) {}
 };
 
@@ -169,6 +175,10 @@ struct ImGridContext {
   ImObjectPool<ImGridEntry> Entries;
 
   ImVec2 Panning;
+  ImVec2 AutoPanningDelta;
+
+  float Zoom;
+
   ImRect GridContentBounds;
 
   ImGridClickInteractionState ClickInteraction;

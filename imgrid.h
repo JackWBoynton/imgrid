@@ -122,6 +122,11 @@ struct ImGridIO {
 
     const bool *Modifier;
   } MultipleSelectModifier;
+
+  int AltMouseButton;
+  float AutoPanningSpeed;
+
+  ImGridIO();
 };
 
 struct ImGridMoveOptions {
@@ -217,6 +222,7 @@ void PrepareElement(ImGridContext *ctx, ImGridEntryData *entry,
                                    bool force_update = false, int max_row = -1);
 void BatchUpdate(ImGridContext *ctx, bool flag = true);
 bool GridContainsEntry(ImGridContext *ctx, ImGridEntryData *entry);
-void InsertNewEntry(ImGridContext *ctx, ImGridEntry *node, bool add_remove = true);
+void InsertNewEntry(ImGridContext *ctx, ImGridEntry *node,
+                    bool add_remove = true);
 
 } // namespace ImGrid

@@ -19,6 +19,9 @@
 
 ImGridContext *GImGrid = NULL;
 
+ImGridIO::ImGridIO()
+    : AltMouseButton(ImGuiMouseButton_Middle), AutoPanningSpeed(1000.0f) {}
+
 ImGridIO::MultipleSelectModifier::MultipleSelectModifier() : Modifier(NULL) {}
 
 ImGridEntry::ImGridEntry(const int id)
@@ -39,6 +42,7 @@ void Initialize(ImGridContext *ctx) {
   ctx->HoveredEntryIdx = -1;
   ctx->HoveredEntryTitleBarIdx = -1;
   ctx->CurrentScope = ImGridScope_None;
+  ctx->Zoom = 1.0f;
 
   StyleColorsDark();
 }
@@ -358,6 +362,16 @@ void BeginCanvasInteraction() {
       any_ui_element_hovered || mouse_not_in_canvas) {
     return;
   }
+
+  const bool started_panning = GImGrid->AltMouseClicked;
+
+  if (started_panning) {
+    GImGrid->ClickInteraction.Type = ImGridClickInteractionType_Panning;
+  } else if (GImGrid->LeftMouseClicked) {
+    GImGrid->ClickInteraction.Type = ImGridClickInteractionType_BoxSelection;
+    GImGrid->ClickInteraction.BoxSelector.Rect.Min =
+        ScreenSpaceToGridSpace(*GImGrid, GImGrid->MousePos);
+  }
 }
 
 void GridCacheRects(ImGridEngine &ctx, float w, float h, float top, float right,
@@ -496,8 +510,8 @@ void TranslateSelectedEntries(ImGridContext &ctx) {
     auto new_x = entry.GridData.Position.x * ctx.Style.GridSpacing;
     auto new_y = entry.GridData.Position.y * ctx.Style.GridSpacing;
 
-    auto min = ScreenSpaceToGridSpace(ctx, ImVec2(new_x, new_y));
-    auto max = ScreenSpaceToGridSpace(
+    auto min = GridSpaceToScreenSpace(ctx, ImVec2(new_x, new_y));
+    auto max = GridSpaceToScreenSpace(
         ctx, ImVec2(new_x + entry.GridData.Position.w * ctx.Style.GridSpacing,
                     new_y + entry.GridData.Position.h * ctx.Style.GridSpacing));
     ctx.CanvasDrawList->AddCircleFilled(min, 5, IM_COL32(0, 0, 255, 255));
@@ -529,16 +543,87 @@ void OnEndMoving(ImGridEngine &engine, ImGridEntry &entry) {
   Engine::GridEndUpdate(engine);
 
   (void)width_changed;
-  // if (entry.Resizing && width_changed) {
-  // }
   entry.HasPreview = false;
   entry.Origin = {
       entry.GridData.Position.x * engine.ParentContext->Style.GridSpacing,
       entry.GridData.Position.y * engine.ParentContext->Style.GridSpacing};
 }
 
+void BoxSelectorUpdateSelection(ImGridContext &ctx, ImRect box_rect) {
+  if (box_rect.Min.x > box_rect.Max.x) {
+    ImSwap(box_rect.Min.x, box_rect.Max.x);
+  }
+
+  if (box_rect.Min.y > box_rect.Max.y) {
+    ImSwap(box_rect.Min.y, box_rect.Max.y);
+  }
+
+  ctx.SelectedEntryIndices.clear();
+
+  // Test for overlap against node rectangles
+
+  for (int node_idx = 0; node_idx < ctx.Entries.Pool.size(); ++node_idx) {
+    if (ctx.Entries.InUse[node_idx]) {
+      auto &node = ctx.Entries.Pool[node_idx];
+      if (box_rect.Overlaps(node.Rect)) {
+        ctx.SelectedEntryIndices.push_back(node_idx);
+      }
+    }
+  }
+}
+
 void ClickInteractionUpdate(ImGridContext &ctx) {
   switch (ctx.ClickInteraction.Type) {
+
+  case ImGridClickInteractionType_BoxSelection: {
+
+    // update the current rect
+    ctx.ClickInteraction.BoxSelector.Rect.Max =
+        ScreenSpaceToGridSpace(ctx, ctx.MousePos);
+    ImRect box_rect = ctx.ClickInteraction.BoxSelector.Rect;
+    box_rect.Min = GridSpaceToScreenSpace(ctx, box_rect.Min);
+    box_rect.Max = GridSpaceToScreenSpace(ctx, box_rect.Max);
+    BoxSelectorUpdateSelection(ctx, box_rect);
+
+    const ImU32 box_selector_color = ctx.Style.Colors[ImGridCol_BoxSelector];
+    const ImU32 box_selector_outline =
+        ctx.Style.Colors[ImGridCol_BoxSelectorOutline];
+    ctx.CanvasDrawList->AddRectFilled(box_rect.Min, box_rect.Max,
+                                      box_selector_color);
+    ctx.CanvasDrawList->AddRect(box_rect.Min, box_rect.Max,
+                                box_selector_outline);
+
+    // handle release
+    if (ctx.LeftMouseReleased) {
+      ImVector<int> &depth_stack = ctx.EntryDepthOrder;
+      const ImVector<int> &selected_idxs = ctx.SelectedEntryIndices;
+
+      // Bump the selected node indices, in order, to the top of the depth
+      // stack. NOTE: this algorithm has worst case time complexity of O(N^2),
+      // if the node selection is ~ N (due to selected_idxs.contains()).
+
+      if ((selected_idxs.Size > 0) && (selected_idxs.Size < depth_stack.Size)) {
+        int num_moved =
+            0; // The number of indices moved. Stop after selected_idxs.Size
+        for (int i = 0; i < depth_stack.Size - selected_idxs.Size; ++i) {
+          for (int node_idx = depth_stack[i]; selected_idxs.contains(node_idx);
+               node_idx = depth_stack[i]) {
+            depth_stack.erase(depth_stack.begin() + static_cast<size_t>(i));
+            depth_stack.push_back(node_idx);
+            ++num_moved;
+          }
+
+          if (num_moved == selected_idxs.Size) {
+            break;
+          }
+        }
+      }
+
+      ctx.ClickInteraction.Type = ImGridClickInteractionType_None;
+    }
+
+    break;
+  }
 
   case ImGridClickInteractionType_Entry: {
     TranslateSelectedEntries(ctx);
@@ -562,6 +647,15 @@ void ClickInteractionUpdate(ImGridContext &ctx) {
     if (ctx.LeftMouseReleased)
       ctx.ClickInteraction.Type = ImGridClickInteractionType_None;
     break;
+  }
+  case ImGridClickInteractionType_Panning: {
+    const bool dragging = ctx.AltMouseDragging;
+
+    if (dragging) {
+      ctx.Panning += ImGui::GetIO().MouseDelta;
+    } else {
+      ctx.ClickInteraction.Type = ImGridClickInteractionType_None;
+    }
   }
   case ImGridClickInteractionType_None:
     break;
@@ -1090,6 +1184,7 @@ void BeginGrid() {
   ObjectPoolReset(GImGrid->Entries);
 
   GImGrid->HoveredEntryIdx.Reset();
+  GImGrid->AutoPanningDelta = ImVec2(0, 0);
   GImGrid->HoveredEntryTitleBarIdx.Reset();
   GImGrid->EntryIndicesOverlappingWithMouse.clear();
   GImGrid->EntryTitleBarIndicesOverlappingWithMouse.clear();
@@ -1099,6 +1194,10 @@ void BeginGrid() {
   GImGrid->LeftMouseReleased = ImGui::IsMouseReleased(0);
   GImGrid->LeftMouseDragging = ImGui::IsMouseDragging(0, 0.0f);
 
+  GImGrid->AltMouseClicked = ImGui::IsMouseClicked(GImGrid->IO.AltMouseButton);
+  GImGrid->AltMouseDragging =
+      ImGui::IsMouseDragging(GImGrid->IO.AltMouseButton, 0.0f);
+  GImGrid->AltMouseScrollDelta = ImGui::GetIO().MouseWheel;
   GImGrid->MultipleSelectModifier =
       (GImGrid->IO.MultipleSelectModifier.Modifier != NULL
            ? *GImGrid->IO.MultipleSelectModifier.Modifier
@@ -1244,15 +1343,32 @@ void EndGrid() {
   DrawListActivateClickInteractionChannel();
 
   if (GImGrid->LeftMouseClicked) {
-    // if (GImGrid->HoveredEntryIdx.HasValue())
-    //   BeginEntrySelection(GImGrid->HoveredEntryIdx.Value());
     if (GImGrid->HoveredEntryTitleBarIdx.HasValue())
       BeginEntrySelection(GImGrid->HoveredEntryTitleBarIdx.Value());
-
-  } else if (GImGrid->LeftMouseClicked || GImGrid->LeftMouseReleased ||
-             GImGrid->AltMouseClicked || GImGrid->AltMouseScrollDelta != 0.f) {
+  }
+  if (GImGrid->LeftMouseClicked || GImGrid->LeftMouseReleased ||
+      GImGrid->AltMouseClicked || GImGrid->AltMouseScrollDelta != 0.f) {
     BeginCanvasInteraction();
   }
+
+  bool should_auto_pan =
+      GImGrid->ClickInteraction.Type ==
+          ImGridClickInteractionType_BoxSelection ||
+      GImGrid->ClickInteraction.Type == ImGridClickInteractionType_Entry;
+  if (should_auto_pan && !MouseInCanvas()) {
+    ImVec2 mouse = ImGui::GetMousePos();
+    ImVec2 center = GImGrid->CanvasRectScreenSpace.GetCenter();
+    ImVec2 direction = (center - mouse);
+    direction = direction * ImInvLength(direction, 0.0);
+
+    GImGrid->AutoPanningDelta =
+        direction * ImGui::GetIO().DeltaTime * GImGrid->IO.AutoPanningSpeed;
+    GImGrid->Panning += GImGrid->AutoPanningDelta;
+  }
+
+  // add a dot at the mouse pos
+  GImGrid->CanvasDrawList->AddCircleFilled(GImGrid->MousePos, 20.f,
+                                           IM_COL32(25, 25, 25, 255));
 
   ClickInteractionUpdate(*GImGrid);
 
@@ -1387,6 +1503,7 @@ void RenderDebug() {
     ImGui::Text("Hovered TB ID: NA");
 
   ImGui::Text("Mouse Pos: %f %f", GImGrid->MousePos.x, GImGrid->MousePos.y);
+  ImGui::Text("Panning: %f %f", GImGrid->Panning.x, GImGrid->Panning.y);
 
   for (int entry_idx = 0; entry_idx < GImGrid->Entries.Pool.size();
        ++entry_idx) {
