@@ -13,41 +13,6 @@ struct ImGridContext;
 
 struct ImGridEngine;
 
-struct ImGridEntryData {
-  ImGridPosition Position;
-  ImGridEntry *Parent;
-  ImGridEngine *ParentContext;
-
-  bool AutoPosition;
-  float MinW, MinH;
-  float MaxW, MaxH;
-  bool NoResize;
-  bool NoMove;
-  bool Locked;
-
-  bool AutoSize;
-
-  bool Dirty;
-  bool Updating;
-  bool Moving;
-  bool SkipDown;
-  ImGridPosition PrevPosition;
-  ImGridPosition Rect;
-  ImVec2 LastUIPosition;
-  ImGridPosition LastTried;
-  ImGridPosition WillFitPos;
-
-  ImGridEntryData(ImGridPosition pos, ImGridEntry *parent)
-      : Position(pos), Parent(parent), ParentContext(NULL), AutoPosition(true),
-        MinW(-1), MinH(-1), MaxW(-1), MaxH(-1), NoResize(false), NoMove(false),
-        Locked(false), AutoSize(true), Dirty(false), Updating(false),
-        Moving(false), SkipDown(false), PrevPosition(), Rect(),
-        LastUIPosition(0, 0), LastTried(), WillFitPos() {}
-
-  ImGridEntryData(ImGridEntry *parent)
-      : Position(), Parent(parent), ParentContext(NULL) {}
-};
-
 typedef int ImGridCellHeightMode; // -> enum ImGridCellHeightMode_
 
 enum ImGridCellHeightMode_ {
@@ -100,7 +65,7 @@ struct ImGridOptions {
   int MarginLeft;
   int MarginRight;
 
-  ImVector<ImGridEntryData *> InitialEntries;
+  ImVector<ImGridEntry *> InitialEntries;
 
   ImGridCellHeightOption CellHeight;
   ImGridColumnOption Column;
@@ -119,9 +84,9 @@ struct ImGridOptions {
 
   ImGridOptions()
       : AcceptWidgets(true), AlwaysShowResizeHandle(false), Animate(false),
-        Auto(true), CellHeight({ImGridCellHeightMode_Auto, 10, 100}),
-        Column({true, 24}), DisableDrag(false), DisableResize(false),
-        Float(false), Margin(10), MaxRow(-1), MinRow(0), SizeToContent(false) {}
+        Auto(true), CellHeight({ImGridCellHeightMode_Auto, 50, 100}),
+        Column({true, 1024}), DisableDrag(false), DisableResize(false),
+        Float(false), Margin(10), MaxRow(-1), MinRow(0), SizeToContent(true) {}
 };
 
 struct ImGridEngine {
@@ -142,15 +107,15 @@ struct ImGridEngine {
   float LastMovingCellHeight;
   float LastMovingCellWidth;
 
-  ImVector<ImGridEntryData *> AddedEntries;
-  ImVector<ImGridEntryData *> RemovedEntries;
-  ImVector<ImGridEntryData *> Entries;
-  std::map<int, ImVector<ImGridEntryData>> CacheLayouts;
+  ImVector<ImGridEntry *> AddedEntries;
+  ImVector<ImGridEntry *> RemovedEntries;
+  ImVector<ImGridEntry *> Entries;
+  std::map<int, ImVector<ImGridEntry>> CacheLayouts;
 
   ImGridContext *ParentContext;
 
   ImGridEngine(ImGridOptions opts = {}) {
-    Column = opts.Column.Auto ? 12 : opts.Column.Columns;
+    Column = opts.Column.Auto ? 1024 : opts.Column.Columns;
     MaxRow = opts.MaxRow;
     Float = opts.Float;
     Entries = opts.InitialEntries;
@@ -167,131 +132,69 @@ struct ImGridEngine {
   }
 };
 
-inline bool GridPositionsAreIntercepted(ImGridPosition a, ImGridPosition b) {
-  return !(a.y >= b.y + b.h || a.y + a.h <= b.y || a.x + a.w <= b.x ||
-           a.x >= b.x + b.w);
-}
-
-inline bool RectsAreTouching(ImGridEntryData &a, ImGridEntryData &b) {
-  return GridPositionsAreIntercepted(a.Position,
-                                     {b.Position.x - 0.5f, b.Position.y - 0.5f,
-                                      b.Position.w + 1.f, b.Position.h + 1.f});
-}
-
-inline bool SwapEntryPositions(ImGridEntryData &a, ImGridEntryData &b) {
-  if (a.Locked || b.Locked)
-    return false;
-
-  auto swapper = [&]() {
-    auto x = b.Position.x;
-    auto y = b.Position.y;
-    b.Position.x = a.Position.x;
-    b.Position.y = a.Position.y; // b -> a position
-    if (a.Position.h != b.Position.h) {
-      a.Position.x = x;
-      a.Position.y = b.Position.y + b.Position.h; // a -> goes after b
-    } else if (a.Position.w != b.Position.w) {
-      a.Position.x = b.Position.x + b.Position.w;
-      a.Position.y = y; // a -> goes after b
-    } else {
-      a.Position.x = x;
-      a.Position.y = y; // a -> old b position
-    }
-    return true;
-  };
-
-  std::optional<bool> touching = false;
-  // same size and same row or column, and touching
-  if (a.Position.w == b.Position.w && a.Position.h == b.Position.h &&
-      (a.Position.x == b.Position.x || a.Position.y == b.Position.y))
-    if (RectsAreTouching(a, b))
-      return swapper();
-  if (touching.has_value() && !touching.value())
-    return false; // IFF ran test and fail, bail out
-
-  // check for taking same columns (but different height) and touching
-  if (a.Position.w == b.Position.w && a.Position.x == b.Position.x &&
-      (touching.value_or(false) || (RectsAreTouching(a, b)))) {
-    return swapper();
-  }
-  if (!touching.value_or(false))
-    return false;
-
-  // check if taking same row (but different width) and touching
-  if (a.Position.h == b.Position.h && a.Position.y == b.Position.y &&
-      (touching || (RectsAreTouching(a, b)))) {
-    return swapper();
-  }
-  return false;
-}
-
 namespace ImGrid::Engine {
 
-bool GridFindEmptyPosition(ImGridEntryData &entry, int column,
-                           ImVector<ImGridEntryData *> &entries,
-                           ImGridEntryData *after);
+bool GridFindEmptyPosition(ImGridEngine &ctx, ImGridEntry &entry, int column,
+                           ImVector<ImGridEntry *> &entries,
+                           ImGridEntry *after);
 
 // Section [Caching]
-int GridFindCacheLayout(ImGridEngine &ctx, ImGridEntryData *node, int column);
-void GridCacheOneLayout(ImGridEngine &ctx, ImGridEntryData *entry, int column);
+int GridFindCacheLayout(ImGridEngine &ctx, ImGridEntry *node, int column);
+void GridCacheOneLayout(ImGridEngine &ctx, ImGridEntry *entry, int column);
 
-void GridNodeBoundFix(ImGridEngine &ctx, ImGridEntryData *entry,
+void GridNodeBoundFix(ImGridEngine &ctx, ImGridEntry *entry,
                       bool resizing = false);
 
-ImGridEntryData *GridPrepareEntry(ImGridEngine &ctx, ImGridEntryData *entry,
-                                  bool resizing = false);
+ImGridEntry *GridPrepareEntry(ImGridEngine &ctx, ImGridEntry *entry,
+                              bool resizing = false);
 
 // Section [Collision]
-ImGridEntryData *GridCollide(ImGridEngine &ctx, ImGridEntryData *skip,
-                             ImGridPosition area, ImGridEntryData *skip2);
-ImVector<ImGridEntryData *> GridCollideAll(ImGridEngine &ctx,
-                                           ImGridEntryData *skip,
-                                           ImGridPosition area,
-                                           ImGridEntryData *skip2);
+ImGridEntry *GridCollide(ImGridEngine &ctx, ImGridEntry *skip,
+                         ImGridPosition area, ImGridEntry *skip2);
+ImVector<ImGridEntry *> GridCollideAll(ImGridEngine &ctx, ImGridEntry *skip,
+                                       ImGridPosition area, ImGridEntry *skip2);
 
 // Section [Sorting]
-void GridSortNodesInplace(ImVector<ImGridEntryData *> &nodes, bool upwards);
-ImVector<ImGridEntryData *> GridSortNodes(ImVector<ImGridEntryData *> nodes,
-                                          bool upwards);
+void GridSortNodesInplace(ImVector<ImGridEntry *> &nodes, bool upwards);
+ImVector<ImGridEntry *> GridSortNodes(ImVector<ImGridEntry *> nodes,
+                                      bool upwards);
 
 void GridPackEntries(ImGridEngine &ctx);
 
-ImGridEntryData *GridCopyPosition(ImGridEntryData *a, ImGridEntryData *b,
-                                  bool include_minmax = false);
-ImGridEntryData *GridCopyPositionFromOpts(ImGridEntryData *a,
-                                          ImGridMoveOptions *b,
-                                          bool include_minmax = false);
-ImGridEntryData *GridCopyPositionToOpts(ImGridEntryData *b,
-                                        ImGridMoveOptions *a,
-                                        bool include_minmax = false);
+ImGridEntry *GridCopyPosition(ImGridEntry *a, ImGridEntry *b,
+                              bool include_minmax = false);
+ImGridEntry *GridCopyPositionFromOpts(ImGridEntry *a, ImGridMoveOptions *b,
+                                      bool include_minmax = false);
+ImGridEntry *GridCopyPositionToOpts(ImGridEntry *b, ImGridMoveOptions *a,
+                                    bool include_minmax = false);
 
-ImGridEntryData *
-GridDirectionCollideCoverage(ImGridEntryData *entry, ImGridMoveOptions &opts,
-                             ImVector<ImGridEntryData *> &collides);
+ImGridEntry *GridDirectionCollideCoverage(ImGridEntry *entry,
+                                          ImGridMoveOptions &opts,
+                                          ImVector<ImGridEntry *> &collides);
 
-bool GridUseEntireRowArea(ImGridEngine &ctx, ImGridEntryData *entry,
+bool GridUseEntireRowArea(ImGridEngine &ctx, ImGridEntry *entry,
                           ImGridPosition new_position);
 
-bool GridFixCollisions(ImGridEngine &ctx, ImGridEntryData *entry,
+bool GridFixCollisions(ImGridEngine &ctx, ImGridEntry *entry,
                        ImGridPosition new_position, // = entry->Position,
-                       ImGridEntryData *collide = NULL,
+                       ImGridEntry *collide = NULL,
                        ImGridMoveOptions opts = {});
 
-bool GridMoveNode(ImGridEngine &ctx, ImGridEntryData *entry,
+bool GridMoveNode(ImGridEngine &ctx, ImGridEntry *entry,
                   ImGridMoveOptions &opts);
 
-ImGridEntryData *GridAddNode(ImGridEngine &ctx, ImGridEntryData *entry,
-                             bool trigger_add_event = false,
-                             ImGridEntryData *after = NULL);
+ImGridEntry *GridAddNode(ImGridEngine &ctx, ImGridEntry *entry,
+                         bool trigger_add_event = false,
+                         ImGridEntry *after = NULL);
 
-void GridRemoveEntry(ImGridEngine &ctx, ImGridEntryData *entry,
+void GridRemoveEntry(ImGridEngine &ctx, ImGridEntry *entry,
                      bool trigger_event = false);
 
-bool GridChangedPosConstrain(ImGridEntryData *entry, ImGridPosition &p);
+bool GridChangedPosConstrain(ImGridEntry *entry, ImGridPosition &p);
 
 int GridGetRow(ImGridEngine &ctx);
 
-bool GridEntryMoveCheck(ImGridEngine &ctx, ImGridEntryData *entry,
+bool GridEntryMoveCheck(ImGridEngine &ctx, ImGridEntry *entry,
                         ImGridMoveOptions opts);
 
 void GridCleanNodes(ImGridEngine &ctx);
@@ -300,7 +203,7 @@ void GridSaveInitial(ImGridEngine &ctx);
 
 void GridBatchUpdate(ImGridEngine &ctx, bool flag = true, bool do_pack = true);
 
-void GridCacheLayout(ImGridEngine &ctx, ImVector<ImGridEntryData *> nodes,
+void GridCacheLayout(ImGridEngine &ctx, ImVector<ImGridEntry *> nodes,
                      int column, bool clear = false);
 
 void GridCompact(ImGridEngine &ctx,
@@ -311,20 +214,19 @@ void GridColumnChanged(ImGridEngine &ctx, int previous_column, int column,
                        ImGridColumnOptions opts = ImGridColumnOptions{
                            ImGridColumnFlags_MoveScale});
 
-ImVector<ImGridEntryData *> GridGetDirtyNodes(ImGridEngine &ctx);
+ImVector<ImGridEntry *> GridGetDirtyNodes(ImGridEngine &ctx);
 
-void GridLayoutsNodesChanged(ImGridEngine &ctx,
-                             ImVector<ImGridEntryData *> &nodes);
+void GridLayoutsNodesChanged(ImGridEngine &ctx, ImVector<ImGridEntry *> &nodes);
 
 void GridTriggerChangeEvent(ImGridEngine &ctx);
 void GridTriggerAddEvent(ImGridEngine &ctx);
 void GridTriggerRemoveEvent(ImGridEngine &ctx);
 
-void GridBeginUpdate(ImGridEngine &ctx, ImGridEntryData *node);
+void GridBeginUpdate(ImGridEngine &ctx, ImGridEntry *node);
 void GridEndUpdate(ImGridEngine &ctx);
 
-void GridFindSpace(ImGridEngine &ctx, ImGridEntryData *entry,
-                   ImVector<ImGridEntryData *> &node_list, int column,
-                   ImGridEntryData *after = NULL);
+void GridFindSpace(ImGridEngine &ctx, ImGridEntry *entry,
+                   ImVector<ImGridEntry *> &node_list, int column,
+                   ImGridEntry *after = NULL);
 
 } // namespace ImGrid::Engine

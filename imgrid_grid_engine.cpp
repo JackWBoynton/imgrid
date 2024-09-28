@@ -4,11 +4,69 @@
 
 #include <cmath>
 
+inline bool GridPositionsAreIntercepted(ImGridPosition a, ImGridPosition b) {
+  return !(a.y >= b.y + b.h || a.y + a.h <= b.y || a.x + a.w <= b.x ||
+           a.x >= b.x + b.w);
+}
+
+inline bool RectsAreTouching(ImGridEntry &a, ImGridEntry &b) {
+  return GridPositionsAreIntercepted(a.Position,
+                                     {b.Position.x - 0.5f, b.Position.y - 0.5f,
+                                      b.Position.w + 1.f, b.Position.h + 1.f});
+}
+
+inline bool SwapEntryPositions(ImGridEntry &a, ImGridEntry &b) {
+  if (a.Locked || b.Locked)
+    return false;
+
+  auto swapper = [&]() {
+    auto x = b.Position.x;
+    auto y = b.Position.y;
+    b.Position.x = a.Position.x;
+    b.Position.y = a.Position.y; // b -> a position
+    if (a.Position.h != b.Position.h) {
+      a.Position.x = x;
+      a.Position.y = b.Position.y + b.Position.h; // a -> goes after b
+    } else if (a.Position.w != b.Position.w) {
+      a.Position.x = b.Position.x + b.Position.w;
+      a.Position.y = y; // a -> goes after b
+    } else {
+      a.Position.x = x;
+      a.Position.y = y; // a -> old b position
+    }
+    return true;
+  };
+
+  std::optional<bool> touching;
+  // same size and same row or column, and touching
+  if (a.Position.w == b.Position.w && a.Position.h == b.Position.h &&
+      (a.Position.x == b.Position.x || a.Position.y == b.Position.y))
+    if (RectsAreTouching(a, b))
+      return swapper();
+  if (touching.has_value() && !touching.value())
+    return false; // IFF ran test and fail, bail out
+
+  // check for taking same columns (but different height) and touching
+  if (a.Position.w == b.Position.w && a.Position.x == b.Position.x &&
+      (touching.value_or(false) || (RectsAreTouching(a, b)))) {
+    return swapper();
+  }
+  if (!touching.value_or(false))
+    return false;
+
+  // check if taking same row (but different width) and touching
+  if (a.Position.h == b.Position.h && a.Position.y == b.Position.y &&
+      (touching || (RectsAreTouching(a, b)))) {
+    return swapper();
+  }
+  return false;
+}
+
 namespace ImGrid::Engine {
 
-bool GridFindEmptyPosition(ImGridEntryData &entry, int column,
-                           ImVector<ImGridEntryData *> &entries,
-                           ImGridEntryData *after) {
+bool GridFindEmptyPosition(ImGridEngine &ctx, ImGridEntry &entry, int column,
+                           ImVector<ImGridEntry *> &entries,
+                           ImGridEntry *after) {
 
   int start = 0;
   if (after != NULL)
@@ -16,7 +74,9 @@ bool GridFindEmptyPosition(ImGridEntryData &entry, int column,
         after->Position.y * column + (after->Position.x + after->Position.w);
 
   bool found = false;
-  for (int i = start; !found; ++i) {
+  const int maxIterations = ctx.Column * ctx.MaxRow;
+
+  for (int i = start; !found && i < maxIterations; ++i) {
     int x = i % column;
     int y = i / column;
     if (x + entry.Position.w > column)
@@ -42,25 +102,25 @@ bool GridFindEmptyPosition(ImGridEntryData &entry, int column,
   return found;
 }
 
-int GridFindCacheLayout(ImGridEngine &ctx, ImGridEntryData *node, int column) {
+int GridFindCacheLayout(ImGridEngine &ctx, ImGridEntry *node, int column) {
   int i = 0;
   for (const auto &cache_node : ctx.CacheLayouts[column]) {
-    if (cache_node.Parent->Id == node->Parent->Id)
+    if (cache_node.Id == node->Id)
       return i;
     i++;
   }
   return -1;
 }
 
-void GridCacheOneLayout(ImGridEngine &ctx, ImGridEntryData *entry, int column) {
+void GridCacheOneLayout(ImGridEngine &ctx, ImGridEntry *entry, int column) {
 
   if (!(entry->Position.x < 119 && entry->Position.y < 119)) {
     IM_ASSERT(false);
   }
-  ImGridEntryData wrapped = {ImGridPosition{entry->Position.x,
-                                            entry->Position.y,
-                                            entry->Position.w, -1},
-                             entry->Parent};
+  ImGridEntry wrapped = {
+      ImGridPosition{entry->Position.x, entry->Position.y, entry->Position.w,
+                     -1},
+  };
   if (entry->AutoPosition || entry->Position.x == -1) {
     entry->Position.x = -1;
     entry->Position.y = -1;
@@ -75,8 +135,7 @@ void GridCacheOneLayout(ImGridEngine &ctx, ImGridEntryData *entry, int column) {
     ctx.CacheLayouts[column][index] = wrapped;
 }
 
-void GridNodeBoundFix(ImGridEngine &ctx, ImGridEntryData *entry,
-                      bool resizing) {
+void GridNodeBoundFix(ImGridEngine &ctx, ImGridEntry *entry, bool resizing) {
   if (!(entry->Position.x < 119 && entry->Position.y < 119)) {
     IM_ASSERT(false);
   }
@@ -102,7 +161,7 @@ void GridNodeBoundFix(ImGridEngine &ctx, ImGridEntryData *entry,
                          ctx.Column;
   if (save_orig && ctx.Column < 12 && !ctx.InColumnResize &&
       GridFindCacheLayout(ctx, entry, 12) == -1) {
-    ImGridEntryData copy = *entry;
+    ImGridEntry copy = *entry;
     if (copy.AutoPosition || copy.Position.x == -1) {
       copy.Position.x = -1;
       copy.Position.y = -1;
@@ -145,15 +204,15 @@ void GridNodeBoundFix(ImGridEngine &ctx, ImGridEntryData *entry,
 }
 
 void GridResizeToContentCheck(ImGridEngine &ctx, bool delay,
-                              ImGridEntryData *entry) {
+                              ImGridEntry *entry) {
   (void)delay;
   (void)entry;
   (void)ctx;
   // TODO: handle delay/anim
 }
 
-ImGridEntryData *GridPrepareEntry(ImGridEngine &ctx, ImGridEntryData *entry,
-                                  bool resizing) {
+ImGridEntry *GridPrepareEntry(ImGridEngine &ctx, ImGridEntry *entry,
+                              bool resizing) {
   if (!(entry->Position.x < 119 && entry->Position.y < 119)) {
     IM_ASSERT(false);
   }
@@ -171,8 +230,8 @@ ImGridEntryData *GridPrepareEntry(ImGridEngine &ctx, ImGridEntryData *entry,
   return entry;
 }
 
-ImVector<ImGridEntryData *> GridGetDirtyNodes(ImGridEngine &ctx) {
-  ImVector<ImGridEntryData *> dirty_nodes;
+ImVector<ImGridEntry *> GridGetDirtyNodes(ImGridEngine &ctx) {
+  ImVector<ImGridEntry *> dirty_nodes;
   for (auto &entry : ctx.Entries) {
     if (entry->Dirty)
       dirty_nodes.push_back(entry);
@@ -181,7 +240,7 @@ ImVector<ImGridEntryData *> GridGetDirtyNodes(ImGridEngine &ctx) {
 }
 
 void GridLayoutsNodesChanged(ImGridEngine &ctx,
-                             ImVector<ImGridEntryData *> &nodes) {
+                             ImVector<ImGridEntry *> &nodes) {
   if (ctx.CacheLayouts.size() == 0 || ctx.InColumnResize)
     return;
 
@@ -195,9 +254,9 @@ void GridLayoutsNodesChanged(ImGridEngine &ctx,
       for (auto &entry : layout) {
         if (!entry.PrevPosition.Valid())
           continue;
-        ImGridEntryData *node = NULL;
+        ImGridEntry *node = NULL;
         for (auto &n : nodes) {
-          if (n->Parent->Id == entry.Parent->Id) {
+          if (n->Id == entry.Id) {
             node = n;
             break;
           }
@@ -219,54 +278,50 @@ void GridLayoutsNodesChanged(ImGridEngine &ctx,
   }
 }
 
-ImGridEntryData *GridCollide(ImGridEngine &ctx, ImGridEntryData *skip,
-                             ImGridPosition area, ImGridEntryData *skip2) {
-  const auto skip_id = skip->Parent->Id;
-  const auto skip2_id = skip2 == NULL ? -1 : skip2->Parent->Id;
+ImGridEntry *GridCollide(ImGridEngine &ctx, ImGridEntry *skip,
+                         ImGridPosition area, ImGridEntry *skip2) {
+  const auto skip_id = skip->Id;
+  const auto skip2_id = skip2 == NULL ? -1 : skip2->Id;
   for (const auto &entry : ctx.Entries) {
-    if (entry->Parent->Id != skip_id && entry->Parent->Id != skip2_id &&
+    if (entry->Id != skip_id && entry->Id != skip2_id &&
         GridPositionsAreIntercepted(entry->Position, area))
       return entry;
   }
   return NULL;
 }
 
-ImVector<ImGridEntryData *> GridCollideAll(ImGridEngine &ctx,
-                                           ImGridEntryData *skip,
-                                           ImGridPosition area,
-                                           ImGridEntryData *skip2) {
-  ImVector<ImGridEntryData *> collided;
+ImVector<ImGridEntry *> GridCollideAll(ImGridEngine &ctx, ImGridEntry *skip,
+                                       ImGridPosition area,
+                                       ImGridEntry *skip2) {
+  ImVector<ImGridEntry *> collided;
   IM_ASSERT(skip != NULL);
-  if (skip2 != NULL)
-    IM_ASSERT(skip2->Parent != NULL);
-  const auto skip_id = skip->Parent->Id;
-  const auto skip2_id = skip2 == NULL ? -1 : skip2->Parent->Id;
+  const auto skip_id = skip->Id;
+  const auto skip2_id = skip2 == NULL ? -1 : skip2->Id;
   for (const auto &entry : ctx.Entries) {
-    if (entry->Parent->Id != skip_id && entry->Parent->Id != skip2_id &&
+    if (entry->Id != skip_id && entry->Id != skip2_id &&
         GridPositionsAreIntercepted(entry->Position, area))
       collided.push_back(entry);
   }
   return collided;
 }
 
-void GridSortNodesInplace(ImVector<ImGridEntryData *> &nodes, bool upwards) {
+void GridSortNodesInplace(ImVector<ImGridEntry *> &nodes, bool upwards) {
   int direction = upwards ? -1 : 1;
   int und = 10000;
 
-  std::sort(
-      nodes.begin(), nodes.end(), [&](ImGridEntryData *a, ImGridEntryData *b) {
-        auto diffY = direction * ((a->Position.y == -1 ? und : a->Position.y) -
-                                  (b->Position.y == -1 ? und : b->Position.y));
-        if (diffY == 0)
-          return direction * ((a->Position.x == -1 ? und : a->Position.x) -
-                              (b->Position.x == -1 ? und : b->Position.x));
-        return diffY;
-      });
+  std::sort(nodes.begin(), nodes.end(), [&](ImGridEntry *a, ImGridEntry *b) {
+    auto diffY = direction * ((a->Position.y == -1 ? und : a->Position.y) -
+                              (b->Position.y == -1 ? und : b->Position.y));
+    if (diffY == 0)
+      return direction * ((a->Position.x == -1 ? und : a->Position.x) -
+                          (b->Position.x == -1 ? und : b->Position.x));
+    return diffY;
+  });
 }
 
-inline ImVector<ImGridEntryData *>
-GridSortNodes(ImVector<ImGridEntryData *> nodes, bool upwards) {
-  ImVector<ImGridEntryData *> sorted_nodes = nodes;
+inline ImVector<ImGridEntry *> GridSortNodes(ImVector<ImGridEntry *> nodes,
+                                             bool upwards) {
+  ImVector<ImGridEntry *> sorted_nodes = nodes;
   GridSortNodesInplace(sorted_nodes, upwards);
   return sorted_nodes;
 }
@@ -352,8 +407,8 @@ void GridPackEntries(ImGridEngine &ctx) {
   }
 }
 
-ImGridEntryData *GridCopyPosition(ImGridEntryData *a, ImGridEntryData *b,
-                                  bool include_minmax) {
+ImGridEntry *GridCopyPosition(ImGridEntry *a, ImGridEntry *b,
+                              bool include_minmax) {
   IM_ASSERT(a != NULL);
   // this allocates a new temporary "Node" that is used to perform
   // transformations
@@ -368,17 +423,16 @@ ImGridEntryData *GridCopyPosition(ImGridEntryData *a, ImGridEntryData *b,
     a->Position.h = b->Position.h;
 
   if (include_minmax) {
-      a->MinW = b->MinW;
-      a->MinH = b->MinH;
-      a->MaxW = b->MaxW;
-      a->MaxH = b->MaxH;
+    a->MinW = b->MinW;
+    a->MinH = b->MinH;
+    a->MaxW = b->MaxW;
+    a->MaxH = b->MaxH;
   }
   return a;
 }
 
-ImGridEntryData *GridCopyPositionFromOpts(ImGridEntryData *a,
-                                          ImGridMoveOptions *b,
-                                          bool include_minmax) {
+ImGridEntry *GridCopyPositionFromOpts(ImGridEntry *a, ImGridMoveOptions *b,
+                                      bool include_minmax) {
   IM_ASSERT(a != NULL);
   // this allocates a new temporary "Node" that is used to perform
   // transformations
@@ -405,9 +459,8 @@ ImGridEntryData *GridCopyPositionFromOpts(ImGridEntryData *a,
   return a;
 }
 
-ImGridEntryData *GridCopyPositionToOpts(ImGridEntryData *b,
-                                        ImGridMoveOptions *a,
-                                        bool include_minmax) {
+ImGridEntry *GridCopyPositionToOpts(ImGridEntry *b, ImGridMoveOptions *a,
+                                    bool include_minmax) {
   IM_ASSERT(a != NULL);
   // this allocates a new temporary "Node" that is used to perform
   // transformations
@@ -434,9 +487,9 @@ ImGridEntryData *GridCopyPositionToOpts(ImGridEntryData *b,
   return b;
 }
 
-ImGridEntryData *
-GridDirectionCollideCoverage(ImGridEntryData *entry, ImGridMoveOptions &opts,
-                             ImVector<ImGridEntryData *> &collides) {
+ImGridEntry *GridDirectionCollideCoverage(ImGridEntry *entry,
+                                          ImGridMoveOptions &opts,
+                                          ImVector<ImGridEntry *> &collides) {
 
   if (!(entry->Position.x < 119 && entry->Position.y < 119)) {
     IM_ASSERT(false);
@@ -461,7 +514,7 @@ GridDirectionCollideCoverage(ImGridEntryData *entry, ImGridMoveOptions &opts,
     r.w += r0.x - r.x;
   }
 
-  ImGridEntryData *collide = NULL;
+  ImGridEntry *collide = NULL;
   float over_max = 0.5f;
   for (auto &n : collides) {
     if (n->Locked || !n->Rect) {
@@ -493,7 +546,7 @@ GridDirectionCollideCoverage(ImGridEntryData *entry, ImGridMoveOptions &opts,
   return collide;
 }
 
-bool GridUseEntireRowArea(ImGridEngine &ctx, ImGridEntryData *entry,
+bool GridUseEntireRowArea(ImGridEngine &ctx, ImGridEntry *entry,
                           ImGridPosition new_position) {
 
   if (!(entry->Position.x < 119 && entry->Position.y < 119)) {
@@ -504,7 +557,7 @@ bool GridUseEntireRowArea(ImGridEngine &ctx, ImGridEntryData *entry,
           new_position.y <= entry->Position.y);
 }
 
-bool GridMoveNode(ImGridEngine &ctx, ImGridEntryData *entry,
+bool GridMoveNode(ImGridEngine &ctx, ImGridEntry *entry,
                   ImGridMoveOptions &opts) {
   if (entry == NULL)
     return false;
@@ -520,10 +573,9 @@ bool GridMoveNode(ImGridEngine &ctx, ImGridEntryData *entry,
 
   bool resizing = (entry->Position.w != opts.Position.w ||
                    entry->Position.h != opts.Position.h);
-  ImGridEntryData new_node(entry->Parent);
+  ImGridEntry new_node(entry->Id);
 
   GridCopyPosition(&new_node, entry, true);
-  new_node.Parent = entry->Parent;
   GridCopyPositionFromOpts(&new_node, &opts);
   GridNodeBoundFix(ctx, &new_node, resizing);
   GridCopyPositionToOpts(&new_node, &opts);
@@ -534,13 +586,13 @@ bool GridMoveNode(ImGridEngine &ctx, ImGridEntryData *entry,
   ImGridPosition prev_pos = entry->Position;
   opts.Skip = NULL;
 
-  ImVector<ImGridEntryData *> collided =
+  ImVector<ImGridEntry *> collided =
       GridCollideAll(ctx, entry, new_node.Position, opts.Skip);
   bool need_to_move = true;
   if (collided.size() > 0) {
     bool active_drag = entry->Moving && !opts.Nested;
 
-    ImGridEntryData *collide =
+    ImGridEntry *collide =
         active_drag ? GridDirectionCollideCoverage(entry, opts, collided)
                     : collided[0];
     // if (active_drag && collide != NULL &&
@@ -573,9 +625,9 @@ bool GridMoveNode(ImGridEngine &ctx, ImGridEntryData *entry,
   return entry->Position == prev_pos;
 }
 
-bool GridFixCollisions(ImGridEngine &ctx, ImGridEntryData *entry,
+bool GridFixCollisions(ImGridEngine &ctx, ImGridEntry *entry,
                        ImGridPosition new_position, // = entry->Position,
-                       ImGridEntryData *collide, ImGridMoveOptions opts) {
+                       ImGridEntry *collide, ImGridMoveOptions opts) {
 
   if (!(entry->Position.x < 119 && entry->Position.y < 119)) {
     IM_ASSERT(false);
@@ -648,8 +700,8 @@ bool GridFixCollisions(ImGridEngine &ctx, ImGridEntryData *entry,
   return did_move;
 }
 
-ImGridEntryData *GridAddNode(ImGridEngine &ctx, ImGridEntryData *entry,
-                             bool trigger_add_event, ImGridEntryData *after) {
+ImGridEntry *GridAddNode(ImGridEngine &ctx, ImGridEntry *entry,
+                         bool trigger_add_event, ImGridEntry *after) {
 
   if (!(entry->Position.x < 119 && entry->Position.y < 119)) {
     IM_ASSERT(false);
@@ -661,7 +713,7 @@ ImGridEntryData *GridAddNode(ImGridEngine &ctx, ImGridEntryData *entry,
 
   bool skip_collision = false;
   if (entry->AutoPosition &&
-      GridFindEmptyPosition(*entry, ctx.Column, ctx.Entries, after)) {
+      GridFindEmptyPosition(ctx, *entry, ctx.Column, ctx.Entries, after)) {
     entry->AutoPosition = false;
     skip_collision = true;
   }
@@ -677,7 +729,7 @@ ImGridEntryData *GridAddNode(ImGridEngine &ctx, ImGridEntryData *entry,
   return entry;
 }
 
-void GridRemoveEntry(ImGridEngine &ctx, ImGridEntryData *entry,
+void GridRemoveEntry(ImGridEngine &ctx, ImGridEntry *entry,
                      bool trigger_event) {
 
   if (!(entry->Position.x < 119 && entry->Position.y < 119)) {
@@ -685,7 +737,7 @@ void GridRemoveEntry(ImGridEngine &ctx, ImGridEntryData *entry,
   }
   bool found = false;
   for (int i = 0; i < ctx.Entries.size(); i++) {
-    if (ctx.Entries[i]->Parent->Id == entry->Parent->Id)
+    if (ctx.Entries[i]->Id == entry->Id)
       found = true;
   }
 
@@ -715,7 +767,7 @@ void GridRemoveEntry(ImGridEngine &ctx, ImGridEntryData *entry,
 */
 
 // TODO: does this need to be by ref?
-bool GridChangedPosConstrain(ImGridEntryData *entry, ImGridPosition &p) {
+bool GridChangedPosConstrain(ImGridEntry *entry, ImGridPosition &p) {
   if (p.w == -1)
     p.w = entry->Position.w;
   if (p.h == -1)
@@ -747,7 +799,7 @@ int GridGetRow(ImGridEngine &ctx) {
   return max_row;
 }
 
-bool GridEntryMoveCheck(ImGridEngine &ctx, ImGridEntryData *entry,
+bool GridEntryMoveCheck(ImGridEngine &ctx, ImGridEntry *entry,
                         ImGridMoveOptions opts) {
   if (!GridChangedPosConstrain(entry, opts.Position))
     return false;
@@ -756,10 +808,10 @@ bool GridEntryMoveCheck(ImGridEngine &ctx, ImGridEntryData *entry,
   if (ctx.MaxRow <= 0)
     return GridMoveNode(ctx, entry, opts);
 
-  ImGridEntryData *cloned_node = NULL;
-  ImVector<ImGridEntryData *> cloned_nodes;
+  ImGridEntry *cloned_node = NULL;
+  ImVector<ImGridEntry *> cloned_nodes;
   for (auto &node : ctx.Entries) {
-    if (node->Parent->Id == entry->Parent->Id)
+    if (node->Id == entry->Id)
       cloned_node = node;
 
     cloned_nodes.push_back(node);
@@ -785,7 +837,7 @@ bool GridEntryMoveCheck(ImGridEngine &ctx, ImGridEntryData *entry,
   for (auto &node : dev_grid.Entries) {
     if (node->Dirty) {
       for (auto &n : ctx.Entries) {
-        if (n->Parent->Id == node->Parent->Id) {
+        if (n->Id == node->Id) {
           GridCopyPosition(n, node);
           n->Dirty = true;
         }
@@ -831,25 +883,29 @@ void GridBatchUpdate(ImGridEngine &ctx, bool flag, bool do_pack) {
   }
 }
 
-void GridCacheLayout(ImGridEngine &ctx, ImVector<ImGridEntryData *> nodes,
+void GridCacheLayout(ImGridEngine &ctx, ImVector<ImGridEntry *> nodes,
                      int column, bool clear) {
-  ImVector<ImGridEntryData> entries;
+  ImVector<ImGridEntry> entries;
   for (int i = 0; i < nodes.size(); ++i) {
     auto &node = nodes[i];
     // TODO: this is gross as we are only overwriting the h
-    entries.push_back(
-        ImGridEntryData{ImGridPosition{node->Position.x, node->Position.y,
-                                       node->Position.w, -1},
-                        node->Parent});
+    entries.push_back(ImGridEntry{
+        ImGridPosition{
+            node->Position.x,
+            node->Position.y,
+            node->Position.w,
+            -1,
+        },
+    });
   }
   if (clear)
     ctx.Entries.clear();
   ctx.CacheLayouts[column] = entries;
 }
 
-void GridFindSpace(ImGridEngine &ctx, ImGridEntryData *entry,
-                   ImVector<ImGridEntryData *> &node_list, int column,
-                   ImGridEntryData *after) {
+void GridFindSpace(ImGridEngine &ctx, ImGridEntry *entry,
+                   ImVector<ImGridEntry *> &node_list, int column,
+                   ImGridEntry *after) {
   (void)ctx;
   float start = after != NULL ? after->Position.y * column +
                                     (after->Position.x + after->Position.w)
@@ -896,12 +952,12 @@ void GridCompact(ImGridEngine &ctx, ImGridColumnFlags opts, bool do_sort) {
   if (was_column_resize)
     ctx.InColumnResize = true;
 
-  ImVector<ImGridEntryData *> new_entries = ctx.Entries; // copy
+  ImVector<ImGridEntry *> new_entries = ctx.Entries; // copy
   ctx.Entries.clear();
 
   for (int i = 0; i < new_entries.size(); ++i) {
     auto *n = new_entries[i];
-    ImGridEntryData *after = NULL;
+    ImGridEntry *after = NULL;
 
     if (!n->Locked) {
       n->AutoPosition = true;
@@ -937,22 +993,22 @@ void GridColumnChanged(ImGridEngine &ctx, int previous_column, int column,
     GridCacheLayout(ctx, ctx.Entries, previous_column);
   GridBatchUpdate(ctx);
 
-  ImVector<ImGridEntryData *> new_entries;
-  ImVector<ImGridEntryData *> ordered_entries =
+  ImVector<ImGridEntry *> new_entries;
+  ImVector<ImGridEntry *> ordered_entries =
       compact ? ctx.Entries : GridSortNodes(ctx.Entries, false);
   if (column > previous_column) {
     int last_index = ctx.CacheLayouts.size() - 1;
-    ImVector<ImGridEntryData> &cache_nodes = ctx.CacheLayouts[last_index];
+    ImVector<ImGridEntry> &cache_nodes = ctx.CacheLayouts[last_index];
     if (!(cache_nodes.size() > 0) && previous_column != last_index &&
         ctx.CacheLayouts[last_index].size() > 0) {
       previous_column = last_index;
       for (auto &entry_wrapper : cache_nodes) {
         // find the matching entry in ordered_entries
-        ImGridEntryData *inner_entry = NULL;
+        ImGridEntry *inner_entry = NULL;
         for (int node_ind = 0;
              node_ind < ordered_entries.size() && inner_entry == NULL;
              ++node_ind) {
-          if (ordered_entries[node_ind]->Parent->Id == entry_wrapper.Parent->Id)
+          if (ordered_entries[node_ind]->Id == entry_wrapper.Id)
             inner_entry = ordered_entries[node_ind];
         }
         if (inner_entry != NULL) {
@@ -967,12 +1023,12 @@ void GridColumnChanged(ImGridEngine &ctx, int previous_column, int column,
 
     // new
     for (auto &cache_node : cache_nodes) {
-      ImGridEntryData *inner_entry = NULL;
+      ImGridEntry *inner_entry = NULL;
       int found_index = -1;
       for (int node_ind = 0;
            node_ind < ordered_entries.size() && inner_entry == NULL;
            ++node_ind) {
-        if (ordered_entries[node_ind]->Parent->Id == cache_node.Parent->Id)
+        if (ordered_entries[node_ind]->Id == cache_node.Id)
           inner_entry = ordered_entries[node_ind];
       }
       if (inner_entry != NULL) {
@@ -983,7 +1039,7 @@ void GridColumnChanged(ImGridEngine &ctx, int previous_column, int column,
 
         if (cache_node.AutoPosition || cache_node.Position.x == -1 ||
             cache_node.Position.y == -1) {
-          GridFindEmptyPosition(cache_node, ctx.Column, new_entries, NULL);
+          GridFindEmptyPosition(ctx, cache_node, ctx.Column, new_entries, NULL);
         }
         if (!cache_node.AutoPosition) {
           inner_entry->Position.x = cache_node.Position.x;
@@ -1040,7 +1096,7 @@ void GridColumnChanged(ImGridEngine &ctx, int previous_column, int column,
   ctx.InColumnResize = false;
 }
 
-void GridBeginUpdate(ImGridEngine &ctx, ImGridEntryData *node) {
+void GridBeginUpdate(ImGridEngine &ctx, ImGridEntry *node) {
   if (!node->Updating) {
     node->Updating = true;
     node->SkipDown = false;

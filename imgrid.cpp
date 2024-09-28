@@ -24,14 +24,35 @@ ImGridIO::ImGridIO()
 
 ImGridIO::MultipleSelectModifier::MultipleSelectModifier() : Modifier(NULL) {}
 
+ImGridEntry::ImGridEntry(const int id, ImGridPosition pos)
+    : Id(id), Position(pos), ParentContext(NULL), AutoPosition(true), MinW(-1),
+      MinH(-1), MaxW(-1), MaxH(-1), NoResize(false), NoMove(false),
+      Locked(false), AutoSize(true), Dirty(false), Updating(false),
+      SkipDown(false), PrevPosition(), Rect(), LastUIPosition(), LastTried(),
+      WillFitPos(), MovingPosition(), Moving(false), PreviewPosition(),
+      HasPreview(false), BorderHovered(false), BorderHeld(false), ColorStyle(),
+      LayoutStyle() {}
+
 ImGridEntry::ImGridEntry(const int id)
-    : Id(id), Origin(0, 0), Rect(), DummySize(0, 0), TitleBarContentRect(),
-      GridData(this), Draggable(true), Resizable(true), Locked(false),
-      Moving(false), PreviewRect(), HasPreview(false), PreviewHeld(false),
-      PreviewHovered(false), CachedItemRect(), ColorStyle(), LayoutStyle() {}
+    : Id(id), Position({}), ParentContext(NULL), AutoPosition(true), MinW(-1),
+      MinH(-1), MaxW(-1), MaxH(-1), NoResize(false), NoMove(false),
+      Locked(false), AutoSize(true), Dirty(false), Updating(false),
+      SkipDown(false), PrevPosition(), Rect(), LastUIPosition(), LastTried(),
+      WillFitPos(), MovingPosition(), Moving(false), PreviewPosition(),
+      HasPreview(false), BorderHovered(false), BorderHeld(false), ColorStyle(),
+      LayoutStyle() {}
+
+ImGridEntry::ImGridEntry(ImGridPosition pos)
+    : Id(-1), Position(pos), ParentContext(NULL), AutoPosition(true), MinW(-1),
+      MinH(-1), MaxW(-1), MaxH(-1), NoResize(false), NoMove(false),
+      Locked(false), AutoSize(true), Dirty(false), Updating(false),
+      SkipDown(false), PrevPosition(), Rect(), LastUIPosition(), LastTried(),
+      WillFitPos(), MovingPosition(), Moving(false), PreviewPosition(),
+      HasPreview(false), BorderHovered(false), BorderHeld(false), ColorStyle(),
+      LayoutStyle() {}
 
 ImGridStyle::ImGridStyle()
-    : GridSpacing(5.f), EntryCornerRounding(4.f), EntryPadding(8.f, 8.f),
+    : GridSpacing(50.f), EntryCornerRounding(4.f), EntryPadding(8.f, 8.f),
       EntryBorderThickness(1.f), Flags(ImGridStyleFlags_None), Colors() {}
 
 namespace ImGrid {
@@ -47,83 +68,19 @@ void Initialize(ImGridContext *ctx) {
   StyleColorsDark();
 }
 
-inline ImVec2 ScreenSpaceToGridSpace(const ImGridContext &ctx,
-                                     const ImVec2 &v) {
-  return v + ctx.CanvasOriginScreenSpace - ctx.Panning;
-}
-
-inline ImRect ScreenSpaceToGridSpace(const ImGridContext &ctx,
-                                     const ImRect &r) {
-  return ImRect(ScreenSpaceToGridSpace(ctx, r.Min),
-                ScreenSpaceToGridSpace(ctx, r.Max));
-}
-
-[[maybe_unused]] inline ImVec2 GridSpaceToScreenSpace(const ImGridContext &ctx,
-                                                      const ImVec2 &v) {
-  return v + ctx.CanvasOriginScreenSpace + ctx.Panning;
-}
-
-inline ImVec2 GridSpaceToSpace(const ImGridContext &ctx, const ImVec2 &v) {
-  return v + ctx.Panning;
-}
-
-[[maybe_unused]] inline ImVec2 SpaceToGridSpace(const ImGridContext &ctx,
-                                                const ImVec2 &v) {
-  return v - ctx.Panning;
-}
-
-inline ImVec2 SpaceToScreenSpace(const ImVec2 &v) {
-  return GImGrid->CanvasOriginScreenSpace + v;
-}
-
-inline ImVec2 GetEntryTitleBarOrigin(const ImGridEntry &node) {
-  return node.Origin + node.LayoutStyle.Padding;
-}
-
 inline ImRect GetItemRectInternal() {
-  auto r = ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
-
-  return r;
+  return ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
 }
 
-[[maybe_unused]] inline ImRect GetItemRect(ImGridContext &ctx,
-                                           ImGridEntry &entry) {
+inline ScreenSpacePosition CanvasSpaceToScreenSpace(const ImGridContext &ctx,
+                                                    const ImVec2 &v) {
+  return ScreenSpacePosition{ctx.CanvasOriginScreenSpace + (v)*ctx.Zoom};
+}
+
+[[maybe_unused]] inline ImRect GetItemRect() {
   // Retrieve the current item rectangle and its size
   ImRect rect = GetItemRectInternal();
-  rect.Expand(entry.LayoutStyle.Padding);
-  if (rect.GetWidth() / ctx.Style.GridSpacing < 1.0f) {
-    rect.Max.x = rect.Min.x + ctx.Style.GridSpacing;
-  }
-  if (rect.GetHeight() / ctx.Style.GridSpacing < 1.0f) {
-    rect.Max.y = rect.Min.y + ctx.Style.GridSpacing;
-  }
-
-  // determine what size of ImGui::Dummy we need to add to get width and height
-  // to be multiples of grid size
-  ImVec2 size = ImVec2(rect.GetWidth(), rect.GetHeight());
-  size.x = ceil(size.x / ctx.Style.GridSpacing) * ctx.Style.GridSpacing;
-  size.y = ceil(size.y / ctx.Style.GridSpacing) * ctx.Style.GridSpacing;
-  auto dummy_size = size - ImVec2(rect.GetWidth(), rect.GetHeight());
-  entry.DummySize = dummy_size;
-  entry.Rect.Expand(dummy_size);
   return rect;
-}
-
-inline ImVec2 GetEntryContentOrigin(const ImGridEntry &node) {
-  const ImVec2 title_bar_height =
-      ImVec2(0.f, node.TitleBarContentRect.GetHeight() +
-                      2.0f * node.LayoutStyle.Padding.y);
-  auto orig = node.Origin + title_bar_height + node.LayoutStyle.Padding;
-  return orig;
-}
-
-inline ImRect GetEntryTitleRect(const ImGridEntry &node) {
-  ImRect expanded_title_rect = node.TitleBarContentRect;
-  expanded_title_rect.Expand(node.LayoutStyle.Padding);
-
-  return ImRect(expanded_title_rect.Min,
-                expanded_title_rect.Min + ImVec2(node.Rect.GetWidth(), 0.f) +
-                    ImVec2(0.f, expanded_title_rect.GetHeight()));
 }
 
 // SECTION[DrawLists]
@@ -349,7 +306,7 @@ bool MouseInCanvas() {
       ImGui::IsWindowHovered() || ImGui::IsWindowFocused();
 
   return is_window_hovered_or_focused &&
-         GImGrid->CanvasRectScreenSpace.Contains(ImGui::GetMousePos());
+         GImGrid->CanvasRectScreenSpace.Contains(GImGrid->MousePos);
 }
 
 void BeginCanvasInteraction() {
@@ -369,8 +326,14 @@ void BeginCanvasInteraction() {
     GImGrid->ClickInteraction.Type = ImGridClickInteractionType_Panning;
   } else if (GImGrid->LeftMouseClicked) {
     GImGrid->ClickInteraction.Type = ImGridClickInteractionType_BoxSelection;
-    GImGrid->ClickInteraction.BoxSelector.Rect.Min =
-        ScreenSpaceToGridSpace(*GImGrid, GImGrid->MousePos);
+    GImGrid->ClickInteraction.BoxSelector.Rect.Min = GImGrid->MousePos;
+  }
+
+  if (GImGrid->CtrlKeyHeld && GImGrid->MouseWheelDelta != 0.0f) {
+    float zoom_increment = 0.1f;
+    float new_zoom = GImGrid->Zoom + GImGrid->MouseWheelDelta * zoom_increment;
+    GImGrid->Zoom =
+        ImClamp(new_zoom, 0.1f, 10.0f); // Clamp zoom level between 0.1x and 10x
   }
 }
 
@@ -385,7 +348,7 @@ void GridCacheRects(ImGridEngine &ctx, float w, float h, float top, float right,
 }
 
 // Public Engine API
-[[maybe_unused]] void MoveNode(ImGridContext *ctx, ImGridEntryData *entry,
+[[maybe_unused]] void MoveNode(ImGridContext *ctx, ImGridEntry *entry,
                                ImGridMoveOptions opts) {
   IM_ASSERT(ctx->Engine != NULL);
   ImGridEngine &engine = *ctx->Engine;
@@ -403,15 +366,9 @@ void GridCacheRects(ImGridEngine &ctx, float w, float h, float top, float right,
   }
 }
 
-ImVec2 SnapOriginToGrid(const ImVec2 &pos, float grid_spacing) {
-  return pos;
-  return ImVec2(std::round(pos.x / grid_spacing) * grid_spacing,
-                std::round(pos.y / grid_spacing) * grid_spacing);
-}
-
 void DragOrResize(ImGridContext &ctx, ImGridEngine &engine, ImGridEntry &entry,
                   ImVec2 origin, const ImVec2 entry_rel) {
-  auto position = entry.GridData.PrevPosition;
+  auto position = entry.PrevPosition;
   // bool resizing;
 
   // float m_height = IM_ROUND(engine.LastMovingCellHeight * 0.1f);
@@ -422,63 +379,54 @@ void DragOrResize(ImGridContext &ctx, ImGridEngine &engine, ImGridEntry &entry,
   // auto m_top = IM_MIN(m_height, engine.Options.MarginTop);
   // auto m_bottom = IM_MIN(m_height, engine.Options.MarginBottom);
 
-  if (entry.Draggable) {
-    entry.Origin = origin + entry_rel;
+  entry.MovingPosition = origin + entry_rel;
 
-    if (ctx.Engine != NULL) {
-      entry.GridData.LastUIPosition = ctx.MousePos;
-      entry.GridData.Moving = true;
+  if (ctx.Engine != NULL) {
+    entry.LastUIPosition = ctx.MousePos;
+    entry.Moving = true;
 
-      // add a circle at the origin
-      ctx.CanvasDrawList->AddCircleFilled(entry.Origin, 5,
-                                          IM_COL32(255, 0, 0, 255));
-      ctx.CanvasDrawList->AddCircleFilled(
-          ScreenSpaceToGridSpace(ctx, entry.Origin), 5,
-          IM_COL32(40, 255, 0, 255));
-      position.x = origin.x + entry_rel.x;
-      position.y = origin.y + entry_rel.y;
+    position.x = origin.x + entry_rel.x;
+    position.y = origin.y + entry_rel.y;
 
-      int prev = engine.ExtraDragRow;
-      if (Engine::GridCollide(engine, &entry.GridData, position, NULL)) {
-        int row = Engine::GridGetRow(engine);
-        int extra = IM_MAX(0, (position.y + entry.GridData.Position.h) - row);
-        if (engine.Options.MaxRow && row + extra > engine.Options.MaxRow) {
-          extra = IM_MAX(0, engine.Options.MaxRow - row);
-        }
-        engine.ExtraDragRow = extra;
-      } else {
-        engine.ExtraDragRow = 0;
+    int prev = engine.ExtraDragRow;
+    if (Engine::GridCollide(engine, &entry, position, NULL)) {
+      int row = Engine::GridGetRow(engine);
+      int extra = IM_MAX(0, (position.y + entry.Position.h) - row);
+      if (engine.Options.MaxRow && row + extra > engine.Options.MaxRow) {
+        extra = IM_MAX(0, engine.Options.MaxRow - row);
       }
+      engine.ExtraDragRow = extra;
+    } else {
+      engine.ExtraDragRow = 0;
+    }
 
-      if (prev != engine.ExtraDragRow) {
-        UpdateContainerHeight(&ctx);
-      }
+    if (prev != engine.ExtraDragRow) {
+      UpdateContainerHeight(&ctx);
+    }
 
-      if (entry.GridData.Position.x == position.x &&
-          entry.GridData.Position.y == position.y) {
-        return;
-      }
+    if (entry.Position.x == position.x && entry.Position.y == position.y) {
+      return;
+    }
 
-      ImGridMoveOptions opts{};
-      // TODO: I think this would feel more natural if rather than using the
-      // center of the object to ask for the next position, we used the mouse
-      // position.
-      opts.Position = {
-          std::ceil((origin.x + entry_rel.x) / ctx.Style.GridSpacing),
-          std::ceil((origin.y + entry_rel.y) / ctx.Style.GridSpacing),
-          entry.GridData.Position.w, entry.GridData.Position.h};
+    ImGridMoveOptions opts{};
+    // TODO: I think this would feel more natural if rather than using the
+    // center of the object to ask for the next position, we used the mouse
+    // position.
+    opts.Position = {
+        std::ceil((origin.x + entry_rel.x) / ctx.Style.GridSpacing),
+        std::ceil((origin.y + entry_rel.y) / ctx.Style.GridSpacing),
+        entry.Position.w, entry.Position.h};
 
-      entry.GridData.LastTried = opts.Position;
-      opts.Skip = NULL;
-      opts.CellWidth = engine.ParentContext->Style.GridSpacing;
-      opts.CellHeight = engine.ParentContext->Style.GridSpacing;
-      if (Engine::GridEntryMoveCheck(engine, &entry.GridData, opts)) {
-        GridCacheRects(engine, engine.ParentContext->Style.GridSpacing,
-                       engine.ParentContext->Style.GridSpacing, 0, 0, 0, 0);
-        entry.GridData.SkipDown = false;
-        engine.ExtraDragRow = 0;
-        UpdateContainerHeight(&ctx);
-      }
+    entry.LastTried = opts.Position;
+    opts.Skip = NULL;
+    opts.CellWidth = engine.ParentContext->Style.GridSpacing;
+    opts.CellHeight = engine.ParentContext->Style.GridSpacing;
+    if (Engine::GridEntryMoveCheck(engine, &entry, opts)) {
+      GridCacheRects(engine, engine.ParentContext->Style.GridSpacing,
+                     engine.ParentContext->Style.GridSpacing, 0, 0, 0, 0);
+      entry.SkipDown = false;
+      engine.ExtraDragRow = 0;
+      UpdateContainerHeight(&ctx);
     }
   }
 }
@@ -487,9 +435,8 @@ void TranslateSelectedEntries(ImGridContext &ctx) {
   if (!ctx.LeftMouseDragging)
     return;
 
-  ImVec2 origin = SnapOriginToGrid(ctx.MousePos - ctx.CanvasOriginScreenSpace -
-                                       ctx.Panning + ctx.PrimaryEntryOffset,
-                                   1.0f);
+  // Convert mouse position to grid units
+  auto origin = ctx.MousePos - ctx.CanvasOriginScreenSpace - ctx.Panning;
 
   for (int i = 0; i < ctx.SelectedEntryIndices.size(); ++i) {
     const ImVec2 entry_rel = ctx.SelectedEntryOffsets[i];
@@ -498,8 +445,7 @@ void TranslateSelectedEntries(ImGridContext &ctx) {
     DragOrResize(ctx, *ctx.Engine, entry, origin, entry_rel);
   }
 
-  GridCacheRects(*ctx.Engine, ctx.Style.GridSpacing, ctx.Style.GridSpacing, 0,
-                 0, 0, 0);
+  GridCacheRects(*ctx.Engine, 50, 50, 0, 0, 0, 0);
 
   // add a preview box where this will snap to if dropped
   for (int i = 0; i < ctx.SelectedEntryIndices.size(); ++i) {
@@ -507,17 +453,8 @@ void TranslateSelectedEntries(ImGridContext &ctx) {
     ImGridEntry &entry = ctx.Entries.Pool[entry_idx];
 
     // have to go from grid space x, y, w, h to a rect of min and max x,y
-    auto new_x = entry.GridData.Position.x * ctx.Style.GridSpacing;
-    auto new_y = entry.GridData.Position.y * ctx.Style.GridSpacing;
-
-    auto min = GridSpaceToScreenSpace(ctx, ImVec2(new_x, new_y));
-    auto max = GridSpaceToScreenSpace(
-        ctx, ImVec2(new_x + entry.GridData.Position.w * ctx.Style.GridSpacing,
-                    new_y + entry.GridData.Position.h * ctx.Style.GridSpacing));
-    ctx.CanvasDrawList->AddCircleFilled(min, 5, IM_COL32(0, 0, 255, 255));
-    auto a = ImRect(min, max);
-    entry.PreviewRect = a; // {new_x, new_y, width, height};
-
+    auto a = GetNodePreviewScreenRect(ctx, entry);
+    entry.PreviewPosition = a.Min;
     entry.HasPreview = true;
   }
 }
@@ -525,7 +462,7 @@ void TranslateSelectedEntries(ImGridContext &ctx) {
 void OnStartMoving(ImGridEngine &engine, ImGridEntry &entry,
                    const int cell_width, const int cell_height) {
   Engine::GridCleanNodes(engine);
-  Engine::GridBeginUpdate(engine, &entry.GridData);
+  Engine::GridBeginUpdate(engine, &entry);
 
   entry.Moving = true;
   GridCacheRects(engine, cell_width, cell_height, 0, 0, 0, 0);
@@ -533,8 +470,7 @@ void OnStartMoving(ImGridEngine &engine, ImGridEntry &entry,
 
 void OnEndMoving(ImGridEngine &engine, ImGridEntry &entry) {
   entry.Moving = false;
-  const bool width_changed =
-      entry.GridData.Position.w != entry.GridData.PrevPosition.w;
+  const bool width_changed = entry.Position.w != entry.PrevPosition.w;
 
   engine.ExtraDragRow = 0;
   UpdateContainerHeight(engine.ParentContext);
@@ -544,12 +480,9 @@ void OnEndMoving(ImGridEngine &engine, ImGridEntry &entry) {
 
   (void)width_changed;
   entry.HasPreview = false;
-  entry.Origin = {
-      entry.GridData.Position.x * engine.ParentContext->Style.GridSpacing,
-      entry.GridData.Position.y * engine.ParentContext->Style.GridSpacing};
 }
 
-void BoxSelectorUpdateSelection(ImGridContext &ctx, ImRect box_rect) {
+void BoxSelectorUpdateSelection(ImGridContext &ctx, ScreenSpaceRect box_rect) {
   if (box_rect.Min.x > box_rect.Max.x) {
     ImSwap(box_rect.Min.x, box_rect.Max.x);
   }
@@ -565,7 +498,7 @@ void BoxSelectorUpdateSelection(ImGridContext &ctx, ImRect box_rect) {
   for (int node_idx = 0; node_idx < ctx.Entries.Pool.size(); ++node_idx) {
     if (ctx.Entries.InUse[node_idx]) {
       auto &node = ctx.Entries.Pool[node_idx];
-      if (box_rect.Overlaps(node.Rect)) {
+      if (box_rect.Overlaps(GetNodeScreenRect(ctx, node))) {
         ctx.SelectedEntryIndices.push_back(node_idx);
       }
     }
@@ -578,11 +511,8 @@ void ClickInteractionUpdate(ImGridContext &ctx) {
   case ImGridClickInteractionType_BoxSelection: {
 
     // update the current rect
-    ctx.ClickInteraction.BoxSelector.Rect.Max =
-        ScreenSpaceToGridSpace(ctx, ctx.MousePos);
-    ImRect box_rect = ctx.ClickInteraction.BoxSelector.Rect;
-    box_rect.Min = GridSpaceToScreenSpace(ctx, box_rect.Min);
-    box_rect.Max = GridSpaceToScreenSpace(ctx, box_rect.Max);
+    ctx.ClickInteraction.BoxSelector.Rect.Max = ctx.MousePos;
+    auto box_rect = ctx.ClickInteraction.BoxSelector.Rect;
     BoxSelectorUpdateSelection(ctx, box_rect);
 
     const ImU32 box_selector_color = ctx.Style.Colors[ImGridCol_BoxSelector];
@@ -652,10 +582,11 @@ void ClickInteractionUpdate(ImGridContext &ctx) {
     const bool dragging = ctx.AltMouseDragging;
 
     if (dragging) {
-      ctx.Panning += ImGui::GetIO().MouseDelta;
+      ctx.Panning += ScreenSpacePosition(ImGui::GetIO().MouseDelta);
     } else {
       ctx.ClickInteraction.Type = ImGridClickInteractionType_None;
     }
+    break;
   }
   case ImGridClickInteractionType_None:
     break;
@@ -663,77 +594,67 @@ void ClickInteractionUpdate(ImGridContext &ctx) {
 }
 
 void DrawEntryDecorations(ImGridEntry &entry) {
+  const auto entry_screen_rect = GetNodeScreenRect(*GImGrid, entry);
   if (entry.Resizable) {
     const ImRect resize_grabber_rect =
-        ImRect((entry.Rect.Max + entry.DummySize) - ImVec2(5, 5),
-               entry.Rect.Max + entry.DummySize);
+        ImRect(entry_screen_rect.Max - ImVec2(5, 5), entry_screen_rect.Max);
 
     // HACK: this ID is wrong
     ImGui::ButtonBehavior(resize_grabber_rect, entry.Id + 3,
-                          &entry.PreviewHovered, &entry.PreviewHeld);
-    if (entry.PreviewHeld || entry.PreviewHovered)
+                          &entry.BorderHovered, &entry.BorderHeld);
+    if (entry.BorderHovered || entry.BorderHeld)
       ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
   }
 }
 
 void DrawEntryPreview(ImGridContext &ctx, const ImGridEntry &entry) {
+  const auto screen_rect = GetNodeScreenRect(ctx, entry);
+  const auto preview_rect = ScreenSpaceRect(
+      entry.PreviewPosition,
+      entry.PreviewPosition +
+          ScreenSpacePosition(screen_rect.GetWidth(), screen_rect.GetHeight()));
   ctx.CanvasDrawList->AddRect(
-      entry.PreviewRect.Min, entry.PreviewRect.Max,
-      entry.ColorStyle.PreviewOutline, entry.LayoutStyle.CornerRounding,
-      ImDrawFlags_None, entry.LayoutStyle.BorderThickness);
-  ctx.CanvasDrawList->AddRectFilled(
-      entry.PreviewRect.Min, entry.PreviewRect.Max,
-      entry.ColorStyle.PreviewFill, entry.LayoutStyle.CornerRounding);
+      preview_rect.Min, preview_rect.Max, entry.ColorStyle.PreviewOutline,
+      entry.LayoutStyle.CornerRounding, ImDrawFlags_None,
+      entry.LayoutStyle.BorderThickness);
+  ctx.CanvasDrawList->AddRectFilled(preview_rect.Min, preview_rect.Max,
+                                    entry.ColorStyle.PreviewFill,
+                                    entry.LayoutStyle.CornerRounding);
 }
 
-[[maybe_unused]] void DrawEntry(ImGridContext &ctx, const int entry_idx) {
+void DrawEntry(ImGridContext &ctx, const int entry_idx) {
   ImGridEntry &entry = ctx.Entries.Pool[entry_idx];
 
-  entry.Origin = {entry.GridData.Position.x * ctx.Style.GridSpacing,
-                  entry.GridData.Position.y * ctx.Style.GridSpacing};
-
-  ImGui::SetCursorPos(entry.Origin + GImGrid->Panning + entry.DummySize / 2);
-  // ImGui::SetCursorPos(
-  //    ImVec2(entry.GridData.Position.x, entry.GridData.Position.y) +
-  //    GImGrid->Panning);
   ImU32 entry_background = entry.ColorStyle.Background;
-  ImU32 titlebar_background = entry.ColorStyle.Titlebar;
+  // ImU32 titlebar_background = entry.ColorStyle.Titlebar;
 
   const bool entry_hovered = ctx.HoveredEntryIdx == entry_idx;
 
-  if (GImGrid->SelectedEntryIndices.contains(entry_idx)) {
+  if (ctx.SelectedEntryIndices.contains(entry_idx)) {
     entry_background = entry.ColorStyle.BackgroundSelected;
-    titlebar_background = entry.ColorStyle.TitlebarSelected;
+    // titlebar_background = entry.ColorStyle.TitlebarSelected;
   } else if (entry_hovered) {
     entry_background = entry.ColorStyle.BackgroundHovered;
-    titlebar_background = entry.ColorStyle.TitlebarHovered;
+    // titlebar_background = entry.ColorStyle.TitlebarHovered;
   }
 
-  GImGrid->CanvasDrawList->AddRectFilled(
-      entry.Rect.Min, entry.Rect.Max + entry.DummySize, entry_background,
-      entry.LayoutStyle.CornerRounding);
+  // Adjust rectangle for zoom
+  auto entry_rect = GetNodeScreenRect(ctx, entry);
 
-  if (entry.TitleBarContentRect.GetHeight() > 0.f) {
-    ImRect title_bar_rect = GetEntryTitleRect(entry);
-
-    GImGrid->CanvasDrawList->AddRectFilled(
-        title_bar_rect.Min,
-        title_bar_rect.Max + (entry.DummySize * ImVec2(1, 0)),
-        titlebar_background, entry.LayoutStyle.CornerRounding,
-        ImDrawFlags_RoundCornersTop);
-  }
+  ctx.CanvasDrawList->AddRectFilled(
+      entry_rect.Min, entry_rect.Max, entry_background,
+      entry.LayoutStyle.CornerRounding * ctx.Zoom);
 
   ctx.CanvasDrawList->AddRect(
-      entry.Rect.Min, entry.Rect.Max + entry.DummySize,
-      entry.ColorStyle.Outline, entry.LayoutStyle.CornerRounding,
-      ImDrawFlags_RoundCornersAll, entry.LayoutStyle.BorderThickness);
+      entry_rect.Min, entry_rect.Max, entry.ColorStyle.Outline,
+      entry.LayoutStyle.CornerRounding * ctx.Zoom, ImDrawFlags_RoundCornersAll,
+      entry.LayoutStyle.BorderThickness * ctx.Zoom);
 
   if (entry_hovered)
     ctx.HoveredEntryIdx = entry_idx;
 
   DrawEntryDecorations(entry);
 }
-
 namespace {
 
 float CellWidth(ImGridEngine &engine) { return engine.Options.Column.Columns; }
@@ -854,11 +775,7 @@ void InitializeEngine(ImGridContext *ctx) {
   for (int entry_idx = 0; entry_idx < GImGrid->Entries.Pool.size();
        ++entry_idx) {
     auto &entry = GImGrid->Entries.Pool[entry_idx];
-    entry.GridData.Position.w =
-        std::ceil(entry.Rect.GetWidth() / GImGrid->Style.GridSpacing);
-    entry.GridData.Position.h =
-        std::ceil(entry.Rect.GetHeight() / GImGrid->Style.GridSpacing);
-    Engine::GridPrepareEntry(*GImGrid->Engine, &entry.GridData);
+    Engine::GridPrepareEntry(*GImGrid->Engine, &entry);
   }
   GImGrid->Engine->Loading = false;
   BatchUpdate(GImGrid, false);
@@ -874,10 +791,10 @@ void BeginEntrySelection(const int entry_idx) {
 
   // Handle resizing
   ImGridEntry &entry = GImGrid->Entries.Pool[entry_idx];
-  if (entry.PreviewHeld)
+  if (entry.BorderHeld)
     GImGrid->ClickInteraction.Type = ImGridClickInteractionType_Resizing;
 
-  if (entry.PreviewHovered || entry.PreviewHeld)
+  if (entry.BorderHovered || entry.BorderHeld)
     return;
 
   GImGrid->ClickInteraction.Type = ImGridClickInteractionType_Entry;
@@ -911,15 +828,25 @@ void BeginEntrySelection(const int entry_idx) {
 
   // To support snapping of multiple nodes, we need to store the offset of
   // each node in the selection to the origin of the dragged node.
-  const ImVec2 ref_origin = GImGrid->Entries.Pool[entry_idx].Origin;
-  GImGrid->PrimaryEntryOffset = ref_origin + GImGrid->CanvasOriginScreenSpace +
-                                GImGrid->Panning - GImGrid->MousePos;
+  const auto entry_screen_rect = GetNodeScreenRect(*GImGrid, entry);
+  const auto entry_position =
+      entry_screen_rect.Min; // Entry's position on screen
 
+  // Store the offset between the mouse position and the entry's position
+  GImGrid->PrimaryEntryOffset = GImGrid->MousePos - entry_position;
+
+  // entry.MoveMouseOffsetRel = entry_position;
+
+  // For multiple selected entries, store the offset
+  // relative to the primary entry
   GImGrid->SelectedEntryOffsets.clear();
   for (int idx = 0; idx < GImGrid->SelectedEntryIndices.Size; idx++) {
     const int node = GImGrid->SelectedEntryIndices[idx];
-    const ImVec2 node_origin = GImGrid->Entries.Pool[node].Origin - ref_origin;
-    GImGrid->SelectedEntryOffsets.push_back(node_origin);
+    const auto node_screen_rect =
+        GetNodeScreenRect(*GImGrid, GImGrid->Entries.Pool[node]);
+    const auto node_position = node_screen_rect.Min;
+    const auto offset = node_position - entry_position;
+    GImGrid->SelectedEntryOffsets.push_back(offset);
   }
 }
 
@@ -951,25 +878,25 @@ ImOptionalIndex ResolveHoveredEntry(const ImVector<int> &depth_stack,
   return ImOptionalIndex(node_idx_on_top);
 }
 
-void DrawGrid(const ImVec2 &canvas_size) {
-  const ImVec2 offset = GImGrid->Panning;
-  ImU32 line_color = GImGrid->Style.Colors[ImGridCol_GridLine];
-  ImU32 line_color_prim = GImGrid->Style.Colors[ImGridCol_GridLinePrimary];
-  bool draw_primary = GImGrid->Style.Flags & ImGridStyleFlags_GridLinesPrimary;
+void DrawGrid(ImGridContext &ctx, const ImVec2 &canvas_size) {
+  const ImVec2 offset = ctx.Panning;
+  ImU32 line_color = ctx.Style.Colors[ImGridCol_GridLine];
+  ImU32 line_color_prim = ctx.Style.Colors[ImGridCol_GridLinePrimary];
+  bool draw_primary = ctx.Style.Flags & ImGridStyleFlags_GridLinesPrimary;
 
-  for (float x = fmodf(offset.x, GImGrid->Style.GridSpacing); x < canvas_size.x;
-       x += GImGrid->Style.GridSpacing) {
-    GImGrid->CanvasDrawList->AddLine(
-        SpaceToScreenSpace(ImVec2(x, 0.0f)),
-        SpaceToScreenSpace(ImVec2(x, canvas_size.y)),
+  for (float x = fmodf(offset.x, ctx.Style.GridSpacing); x < canvas_size.x;
+       x += ctx.Style.GridSpacing) {
+    ctx.CanvasDrawList->AddLine(
+        CanvasSpaceToScreenSpace(ctx, ImVec2(x, 0.0f)),
+        CanvasSpaceToScreenSpace(ctx, ImVec2(x, canvas_size.y)),
         offset.x - x == 0.f && draw_primary ? line_color_prim : line_color);
   }
 
-  for (float y = fmodf(offset.y, GImGrid->Style.GridSpacing); y < canvas_size.y;
-       y += GImGrid->Style.GridSpacing) {
-    GImGrid->CanvasDrawList->AddLine(
-        SpaceToScreenSpace(ImVec2(0.0f, y)),
-        SpaceToScreenSpace(ImVec2(canvas_size.x, y)),
+  for (float y = fmodf(offset.y, ctx.Style.GridSpacing); y < canvas_size.y;
+       y += ctx.Style.GridSpacing) {
+    ctx.CanvasDrawList->AddLine(
+        CanvasSpaceToScreenSpace(ctx, ImVec2(0.0f, y)),
+        CanvasSpaceToScreenSpace(ctx, ImVec2(canvas_size.x, y)),
         offset.y - y == 0.f && draw_primary ? line_color_prim : line_color);
   }
 
@@ -1115,12 +1042,12 @@ void UpdateContainerHeight(ImGridContext *ctx) {
 }
 
 void DoResizeToContentCheck(ImGridContext *ctx, bool delay,
-                            ImGridEntryData *entry) {
+                            ImGridEntry *entry) {
   (void)entry;
   (void)delay;
   (void)ctx;
 }
-void PrepareElement(ImGridContext *ctx, ImGridEntryData *entry,
+void PrepareElement(ImGridContext *ctx, ImGridEntry *entry,
                     bool trigger_add_event) {
   IM_ASSERT(ctx != NULL);
   IM_ASSERT(ctx->Engine != NULL);
@@ -1131,7 +1058,7 @@ void PrepareElement(ImGridContext *ctx, ImGridEntryData *entry,
   DoResizeToContentCheck(ctx, false, entry);
 }
 
-void MakeWidget(ImGridContext *ctx, ImGridEntryData *entry) {
+void MakeWidget(ImGridContext *ctx, ImGridEntry *entry) {
   IM_ASSERT(ctx != NULL);
   IM_ASSERT(ctx->Engine != NULL);
   IM_ASSERT(entry != NULL);
@@ -1180,7 +1107,8 @@ void BeginGrid() {
   GImGrid->CurrentScope = ImGridScope_Grid;
 
   // reset state
-  GImGrid->GridContentBounds = ImRect(FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX);
+  GImGrid->GridContentBounds =
+      ScreenSpaceRect(FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX);
   ObjectPoolReset(GImGrid->Entries);
 
   GImGrid->HoveredEntryIdx.Reset();
@@ -1189,7 +1117,7 @@ void BeginGrid() {
   GImGrid->EntryIndicesOverlappingWithMouse.clear();
   GImGrid->EntryTitleBarIndicesOverlappingWithMouse.clear();
 
-  GImGrid->MousePos = ImGui::GetIO().MousePos;
+  GImGrid->MousePos = ScreenSpacePosition(ImGui::GetIO().MousePos);
   GImGrid->LeftMouseClicked = ImGui::IsMouseClicked(0);
   GImGrid->LeftMouseReleased = ImGui::IsMouseReleased(0);
   GImGrid->LeftMouseDragging = ImGui::IsMouseDragging(0, 0.0f);
@@ -1198,6 +1126,8 @@ void BeginGrid() {
   GImGrid->AltMouseDragging =
       ImGui::IsMouseDragging(GImGrid->IO.AltMouseButton, 0.0f);
   GImGrid->AltMouseScrollDelta = ImGui::GetIO().MouseWheel;
+  GImGrid->MouseWheelDelta = ImGui::GetIO().MouseWheel;
+  GImGrid->CtrlKeyHeld = ImGui::GetIO().KeyCtrl;
   GImGrid->MultipleSelectModifier =
       (GImGrid->IO.MultipleSelectModifier.Modifier != NULL
            ? *GImGrid->IO.MultipleSelectModifier.Modifier
@@ -1211,7 +1141,8 @@ void BeginGrid() {
     ImGui::BeginChild("editor_scrolling_region", ImVec2(0.f, 0.f), true,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove |
                           ImGuiWindowFlags_NoScrollWithMouse);
-    GImGrid->CanvasOriginScreenSpace = ImGui::GetCursorScreenPos();
+    GImGrid->CanvasOriginScreenSpace =
+        ScreenSpacePosition(ImGui::GetCursorScreenPos());
 
     // NOTE: we have to fetch the canvas draw list *after* we call
     // BeginChild(), otherwise the ImGui UI elements are going to be
@@ -1221,10 +1152,10 @@ void BeginGrid() {
     {
       const ImVec2 canvas_size = ImGui::GetWindowSize();
       GImGrid->CanvasRectScreenSpace =
-          ImRect(SpaceToScreenSpace(ImVec2(0.f, 0.f)),
-                 SpaceToScreenSpace(canvas_size));
+          ScreenSpaceRect(CanvasSpaceToScreenSpace(*GImGrid, ImVec2(0.f, 0.f)),
+                          CanvasSpaceToScreenSpace(*GImGrid, canvas_size));
 
-      DrawGrid(canvas_size);
+      DrawGrid(*GImGrid, canvas_size);
     }
   }
 }
@@ -1235,9 +1166,8 @@ void InsertNewEntry(ImGridContext *ctx, ImGridEntry *node, bool add_remove) {
   IM_ASSERT(ctx->Engine != NULL);
   IM_ASSERT(node != NULL);
   ImGridEngine &engine = *ctx->Engine;
-  ImGridEntryData *entry = &node->GridData;
 
-  ImGridPosition copy = entry->Position;
+  ImGridPosition copy = node->Position;
 
   const int column = engine.Column;
   copy.w = copy.w == -1 ? 1 : copy.w;
@@ -1246,8 +1176,8 @@ void InsertNewEntry(ImGridContext *ctx, ImGridEntry *node, bool add_remove) {
   int max_column = copy.x == -1 ? 0 : copy.x + copy.w;
   if (max_column > column) {
     engine.IgnoreLayoutsNodeChange = true;
-    ImVector<ImGridEntryData *> entries;
-    entries.push_back(entry);
+    ImVector<ImGridEntry *> entries;
+    entries.push_back(node);
     Engine::GridCacheLayout(engine, entries, max_column, true);
   }
 
@@ -1257,40 +1187,24 @@ void InsertNewEntry(ImGridContext *ctx, ImGridEntry *node, bool add_remove) {
 
   engine.Loading = true;
 
-  ImVector<ImGridEntryData *> updates;
+  ImVector<ImGridEntry *> updates;
 
-  if (entry->AutoSize)
-    entry->Position.w =
-        std::ceil(node->Rect.GetWidth() / ctx->Style.GridSpacing);
+  Engine::GridNodeBoundFix(engine, node);
 
-  Engine::GridNodeBoundFix(engine, entry);
-
-  if (entry->AutoPosition || entry->Position.x == -1 ||
-      entry->Position.y == -1) {
-    entry->Position.w =
-        (entry->Position.w <= 0
-             ? std::ceil(node->Rect.GetWidth() / ctx->Style.GridSpacing)
-             : entry->Position.w);
-    entry->Position.h =
-        (entry->Position.h <= 0
-             ? std::ceil(node->Rect.GetHeight() / ctx->Style.GridSpacing)
-             : entry->Position.h);
-    Engine::GridFindSpace(engine, entry, engine.Entries, engine.Column);
+  if (node->AutoPosition || node->Position.x == -1 || node->Position.y == -1) {
+    Engine::GridFindSpace(engine, node, engine.Entries, engine.Column);
   }
-  engine.Entries.push_back(entry);
+  engine.Entries.push_back(node);
 
   if (add_remove) {
-    entry->AutoPosition = true;
-    Engine::GridPrepareEntry(engine, entry);
-    MakeWidget(ctx, entry);
+    node->AutoPosition = true;
+    Engine::GridPrepareEntry(engine, node);
+    MakeWidget(ctx, node);
   }
 
   engine.Loading = false;
   BatchUpdate(ctx, false);
   engine.IgnoreLayoutsNodeChange = false;
-
-  node->Origin = {entry->Position.x * ctx->Style.GridSpacing,
-                  entry->Position.y * ctx->Style.GridSpacing};
 }
 
 void EndGrid() {
@@ -1300,8 +1214,7 @@ void EndGrid() {
 
   bool no_grid_content = GImGrid->GridContentBounds.IsInverted();
   if (no_grid_content)
-    GImGrid->GridContentBounds =
-        ScreenSpaceToGridSpace(*GImGrid, GImGrid->CanvasRectScreenSpace);
+    GImGrid->GridContentBounds = GImGrid->CanvasRectScreenSpace;
 
   if (GImGrid->LeftMouseClicked && ImGui::IsAnyItemActive())
     GImGrid->ClickInteraction.Type = ImGridClickInteractionType_ImGuiItem;
@@ -1315,7 +1228,6 @@ void EndGrid() {
                             GImGrid->EntryTitleBarIndicesOverlappingWithMouse);
   }
 
-  // GridImpl initialization
   if (GImGrid->Engine == NULL) {
     InitializeEngine(GImGrid);
   }
@@ -1323,13 +1235,11 @@ void EndGrid() {
   for (int entry_idx = 0; entry_idx < GImGrid->Entries.Pool.size();
        ++entry_idx) {
     ImGridEntry &entry = GImGrid->Entries.Pool[entry_idx];
-    if (!GridContainsEntry(GImGrid, &entry.GridData)) {
+    if (!GridContainsEntry(GImGrid, &entry)) {
       InsertNewEntry(GImGrid, &entry);
       GridCacheRects(*GImGrid->Engine, GImGrid->Style.GridSpacing,
                      GImGrid->Style.GridSpacing, 0, 0, 0, 0);
-      entry.Origin =
-          ImVec2(entry.GridData.Position.x, entry.GridData.Position.y);
-      entry.GridData.ParentContext = GImGrid->Engine;
+      entry.ParentContext = GImGrid->Engine;
     }
     if (GImGrid->Entries.InUse[entry_idx]) {
       DrawListActivateEntryBackground(entry_idx);
@@ -1356,19 +1266,15 @@ void EndGrid() {
           ImGridClickInteractionType_BoxSelection ||
       GImGrid->ClickInteraction.Type == ImGridClickInteractionType_Entry;
   if (should_auto_pan && !MouseInCanvas()) {
-    ImVec2 mouse = ImGui::GetMousePos();
-    ImVec2 center = GImGrid->CanvasRectScreenSpace.GetCenter();
-    ImVec2 direction = (center - mouse);
+    auto mouse = GImGrid->MousePos;
+    auto center = GImGrid->CanvasRectScreenSpace.GetCenter();
+    auto direction = (center - mouse);
     direction = direction * ImInvLength(direction, 0.0);
 
     GImGrid->AutoPanningDelta =
         direction * ImGui::GetIO().DeltaTime * GImGrid->IO.AutoPanningSpeed;
     GImGrid->Panning += GImGrid->AutoPanningDelta;
   }
-
-  // add a dot at the mouse pos
-  GImGrid->CanvasDrawList->AddCircleFilled(GImGrid->MousePos, 20.f,
-                                           IM_COL32(25, 25, 25, 255));
 
   ClickInteractionUpdate(*GImGrid);
 
@@ -1396,12 +1302,11 @@ void EndEntryTitleBar() {
   IM_ASSERT(GImGrid->CurrentScope == ImGridScope_Entry);
   ImGui::EndGroup();
 
-  ImGridEntry &entry = GImGrid->Entries.Pool[GImGrid->CurrentEntryIdx];
-  entry.TitleBarContentRect = GetItemRectInternal();
+  // ImGridEntry &entry = GImGrid->Entries.Pool[GImGrid->CurrentEntryIdx];
 
-  ImGui::ItemAdd(GetEntryTitleRect(entry), ImGui::GetID("title_bar"));
+  // ImGui::ItemAdd(GetEntryTitleRect(entry), ImGui::GetID("title_bar"));
 
-  ImGui::SetCursorPos(GridSpaceToSpace(*GImGrid, GetEntryContentOrigin(entry)));
+  // ImGui::SetCursorPos(GetNodeScreenRect(*GImGrid, entry).Min);
 }
 
 void BeginEntry(const int entry_id) {
@@ -1434,8 +1339,7 @@ void BeginEntry(const int entry_id) {
   entry.LayoutStyle.Padding = GImGrid->Style.EntryPadding;
   entry.LayoutStyle.BorderThickness = GImGrid->Style.EntryBorderThickness;
 
-  ImGui::SetCursorPos(
-      GridSpaceToSpace(*GImGrid, GetEntryTitleBarOrigin(entry)));
+  ImGui::SetCursorPos(GetNodeScreenRect(*GImGrid, entry).Min);
 
   DrawListAddEntry(entry_idx);
   DrawListActivateCurrentEntryForeground();
@@ -1444,7 +1348,7 @@ void BeginEntry(const int entry_id) {
   ImGui::BeginGroup();
 }
 
-bool GridContainsEntry(ImGridContext *ctx, ImGridEntryData *entry) {
+bool GridContainsEntry(ImGridContext *ctx, ImGridEntry *entry) {
   (void)ctx;
   IM_ASSERT(ctx != NULL);
   IM_ASSERT(entry != NULL);
@@ -1458,37 +1362,33 @@ void EndEntry() {
 
   // Hack to force the size to be multiples of grid size
   ImGridEntry &entry = GImGrid->Entries.Pool[GImGrid->CurrentEntryIdx];
-  ImGui::Dummy(entry.DummySize);
 
   ImGui::EndGroup();
   ImGui::PopID();
 
-  entry.Rect = GetItemRect(*GImGrid, entry);
-  entry.GridData.MinW = -1;
-  entry.GridData.MinH = -1;
-  entry.GridData.MaxW = -1;
-  entry.GridData.MaxH = -1;
-  // entry.GridData.Position.w = std::round(entry.Rect.GetWidth() /
-  // GImGrid->Style.GridSpacing) * GImGrid->Style.GridSpacing;
-  // entry.GridData.Position.h = std::round(entry.Rect.GetHeight() /
-  // GImGrid->Style.GridSpacing) * GImGrid->Style.GridSpacing;
+  auto entry_rect = GetItemRect();
+  // add grid width/height to the entry
+  UpdateNodeGridSpaceSize(*GImGrid, entry, entry_rect.GetWidth(),
+                          entry_rect.GetHeight());
 
-  GImGrid->GridContentBounds.Add(entry.Origin);
-  GImGrid->GridContentBounds.Add(entry.Origin + entry.Rect.GetSize());
+  // get the screen coordinates of the entry
+  auto screen_rect = GetNodeScreenRect(*GImGrid, entry);
 
-  if (entry.Rect.Contains(GImGrid->MousePos))
+  GImGrid->GridContentBounds.Add(screen_rect.GetCenter());
+  GImGrid->GridContentBounds.Add(screen_rect.Min);
+
+  if (screen_rect.Contains(GImGrid->MousePos))
     GImGrid->EntryIndicesOverlappingWithMouse.push_back(
         GImGrid->CurrentEntryIdx);
 
   // GetEntryTitleRect adds padding and makes it full width
-  if (GetEntryTitleRect(entry).Contains(GImGrid->MousePos)) {
+  if (screen_rect.Contains(GImGrid->MousePos)) {
     GImGrid->EntryTitleBarIndicesOverlappingWithMouse.push_back(
         GImGrid->CurrentEntryIdx);
   }
 }
 
 void RenderDebug() {
-
   ImGui::Text("Panning: %f %f", GImGrid->Panning.x, GImGrid->Panning.y);
 
   ImGui::Text("Click Interaction: %d", GImGrid->ClickInteraction.Type);
@@ -1509,20 +1409,10 @@ void RenderDebug() {
        ++entry_idx) {
     const auto &entry = GImGrid->Entries.Pool[entry_idx];
     ImGui::Text("%d: ", entry.Id);
-    ImGui::Text("   %f %f", entry.Origin.x, entry.Origin.y);
-    ImGui::Text("  C:  %f %f %f %f", entry.Rect.Min.x, entry.Rect.Min.y,
-                entry.Rect.Max.x, entry.Rect.Max.y);
-    ImGui::Text("  TB: %f %f %f %f", entry.TitleBarContentRect.Min.x,
-                entry.TitleBarContentRect.Min.y,
-                entry.TitleBarContentRect.Max.x,
-                entry.TitleBarContentRect.Max.y);
-    ImGui::Text("   Draggable: %d Resizable: %d", entry.Draggable,
-                entry.Resizable);
 
-    ImGui::Text("Engine x: %f y: %f w: %f h: %f", entry.GridData.Position.x,
-                entry.GridData.Position.y, entry.GridData.Position.w,
-                entry.GridData.Position.h);
-    ImGui::Text("Moving: %d", entry.GridData.Moving);
+    ImGui::Text("Engine x: %f y: %f w: %f h: %f", entry.Position.x,
+                entry.Position.y, entry.Position.w, entry.Position.h);
+    ImGui::Text("Moving: %d", entry.Moving);
   }
 }
 

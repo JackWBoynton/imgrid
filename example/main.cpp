@@ -68,7 +68,6 @@ GuageColorMap *GuageColorMap::Editing = nullptr;
 bool GuageColorMap::Render() {
   bool set = false;
   if (ImGui::BeginPopup("ColorMap Popup")) {
-    printf("Asdfasdf\n");
 
     if (GuageColorMap::Editing == nullptr) {
       ImGui::EndPopup();
@@ -280,7 +279,7 @@ int main(int, char **) {
   font_cfg.SizePixels = 26.0f;
   auto *default_font = io.Fonts->AddFontDefault();
   (void)default_font;
-  auto *big_font = io.Fonts->AddFontDefault(&font_cfg);
+  [[maybe_unused]] auto *big_font = io.Fonts->AddFontDefault(&font_cfg);
 
   // Setup Platform/Renderer backends
   ImGui_ImplGlfw_InitForOpenGL(window, true);
@@ -366,15 +365,16 @@ int main(int, char **) {
         ImGrid::BeginEntryTitleBar();
         ImGui::Text("Entry 0");
         ImGrid::EndEntryTitleBar();
-        ImGui::SetNextItemWidth(100);
-        ImGui::SliderFloat("float", &f, 0.0f, 100.0f);
-        ImGui::SetNextItemWidth(100);
-        ImGui::SliderFloat("radius", &radius, 0.0f, 300.0f);
-        ImGui::SetNextItemWidth(100);
-        ImGui::SliderFloat("thickness", &thickness, 0.0f, 50.0f);
+        ImGui::Dummy(ImVec2(200, 200));
+        // ImGui::SetNextItemWidth(100);
+        // ImGui::SliderFloat("float", &f, 0.0f, 100.0f);
+        // ImGui::SetNextItemWidth(100);
+        // ImGui::SliderFloat("radius", &radius, 0.0f, 300.0f);
+        // ImGui::SetNextItemWidth(100);
+        // ImGui::SliderFloat("thickness", &thickness, 0.0f, 50.0f);
 
-        SimpleGuage("Guage", f, 0.0f, 100.0f, colorMap, "%.2f", radius,
-                    thickness);
+        // SimpleGuage("Guage", f, 0.0f, 100.0f, colorMap, "%.2f", radius,
+        //            thickness);
       }
       ImGrid::EndEntry();
       int i = 1;
@@ -399,37 +399,51 @@ int main(int, char **) {
         ImGrid::EndEntry();
       }
 
-      for (; i < 5; i++) {
-        ImGrid::BeginEntry(i);
-        {
-          ImGrid::BeginEntryTitleBar();
-          ImGui::Text("Entry %d", i);
-          ImGrid::EndEntryTitleBar();
-          ImGui::Text("Entry %d content", i);
+      // for (; i < 5; i++) {
+      //   ImGrid::BeginEntry(i);
+      //   {
+      //     ImGrid::BeginEntryTitleBar();
+      //     ImGui::Text("Entry %d", i);
+      //     ImGrid::EndEntryTitleBar();
+      //     ImGui::Text("Entry %d content", i);
 
-          ImPlot::PushStyleVar(ImPlotStyleVar_PlotDefaultSize,
-                               ImVec2(300, 300));
-          ImPlot::Demo_LinePlots();
-          ImPlot::PopStyleVar();
-        }
-        ImGrid::EndEntry();
-      }
+      //    ImPlot::PushStyleVar(ImPlotStyleVar_PlotDefaultSize,
+      //                         ImVec2(300, 300));
+      //    ImPlot::Demo_LinePlots();
+      //    ImPlot::PopStyleVar();
+      //  }
+      //  ImGrid::EndEntry();
+      //}
 
-      for (; i < 6; i++) {
-        ImGrid::BeginEntry(i);
-        {
-          ImGrid::BeginEntryTitleBar();
-          ImGui::Text("Entry %d", i);
-          ImGrid::EndEntryTitleBar();
-          ImGui::Text("Entry %d content", i);
+      // for (; i < 6; i++) {
+      //   ImGrid::BeginEntry(i);
+      //   {
+      //     ImGrid::BeginEntryTitleBar();
+      //     ImGui::Text("Entry %d", i);
+      //     ImGrid::EndEntryTitleBar();
+      //     ImGui::Text("Entry %d content", i);
 
-          ImPlot::PushStyleVar(ImPlotStyleVar_PlotDefaultSize,
-                               ImVec2(400, 200));
-          ImPlot::Demo_RealtimePlots();
-          ImPlot::PopStyleVar();
-        }
-        ImGrid::EndEntry();
-      }
+      //    ImPlot::PushStyleVar(ImPlotStyleVar_PlotDefaultSize,
+      //                         ImVec2(400, 200));
+      //    ImPlot::Demo_RealtimePlots();
+      //    ImPlot::PopStyleVar();
+      //  }
+      //  ImGrid::EndEntry();
+      //}
+      // for (; i < 8; i++) {
+      //  ImGrid::BeginEntry(i);
+      //  {
+      //    ImGrid::BeginEntryTitleBar();
+      //    ImGui::Text("Entry %d", i);
+      //    ImGrid::EndEntryTitleBar();
+      //    ImGui::Text("Entry %d content", i);
+
+      //    ImGui::PushFont(big_font);
+      //    ImGui::Text("%f", f);
+      //    ImGui::PopFont();
+      //  }
+      //  ImGrid::EndEntry();
+      //}
       for (; i < 8; i++) {
         ImGrid::BeginEntry(i);
         {
@@ -438,9 +452,7 @@ int main(int, char **) {
           ImGrid::EndEntryTitleBar();
           ImGui::Text("Entry %d content", i);
 
-          ImGui::PushFont(big_font);
-          ImGui::Text("%f", f);
-          ImGui::PopFont();
+          ImGui::Dummy(ImVec2(50 * i, 50 * i));
         }
         ImGrid::EndEntry();
       }

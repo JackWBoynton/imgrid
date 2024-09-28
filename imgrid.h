@@ -56,7 +56,7 @@ enum ImGridColumnFlags_ {
 struct ImGuiContext;
 struct ImVec2;
 struct ImRect;
-struct ImGridEntryData;
+struct ImGridEntry;
 struct ImGridEntry;
 
 struct ImGridPosition {
@@ -90,8 +90,8 @@ inline bool operator==(const ImGridPosition &lhs, const ImGridPosition &rhs) {
 
 struct ImGridColumnOptions {
   ImGridColumnFlags Flags;
-  std::function<void(int, int, ImVector<ImGridEntryData *>,
-                     ImVector<ImGridEntryData *>)>
+  std::function<void(int, int, ImVector<ImGridEntry *>,
+                     ImVector<ImGridEntry *>)>
       Func;
   ImGridColumnOptions(ImGridColumnFlags flags) : Flags(flags), Func() {}
 };
@@ -134,7 +134,7 @@ struct ImGridMoveOptions {
   float MinW, MinH;
   float MaxW, MaxH;
 
-  ImGridEntryData *Skip;
+  ImGridEntry *Skip;
   bool Pack;
   bool Nested;
 
@@ -150,7 +150,7 @@ struct ImGridMoveOptions {
 
   bool Resizing;
 
-  ImGridEntryData *Collide;
+  ImGridEntry *Collide;
 
   bool ForceCollide;
 
@@ -210,18 +210,17 @@ bool IsEntryHovered(int *entry_id);
 void RenderDebug();
 
 // Public Grid API
-void MoveNode(ImGridContext &ctx, ImGridEntryData *entry,
-              ImGridMoveOptions opts);
+void MoveNode(ImGridContext &ctx, ImGridEntry *entry, ImGridMoveOptions opts);
 void UpdateContainerHeight(ImGridContext *ctx);
 void DoResizeToContentCheck(ImGridContext *ctx, bool delay = false,
-                            ImGridEntryData *entry = NULL);
-void PrepareElement(ImGridContext *ctx, ImGridEntryData *entry,
+                            ImGridEntry *entry = NULL);
+void PrepareElement(ImGridContext *ctx, ImGridEntry *entry,
                     bool trigger_add_event = false);
-[[maybe_unused]] void MakeWidget(ImGridContext *ctx, ImGridEntryData *entry);
+[[maybe_unused]] void MakeWidget(ImGridContext *ctx, ImGridEntry *entry);
 [[maybe_unused]] void UpdateStyles(ImGridContext *ctx,
                                    bool force_update = false, int max_row = -1);
 void BatchUpdate(ImGridContext *ctx, bool flag = true);
-bool GridContainsEntry(ImGridContext *ctx, ImGridEntryData *entry);
+bool GridContainsEntry(ImGridContext *ctx, ImGridEntry *entry);
 void InsertNewEntry(ImGridContext *ctx, ImGridEntry *node,
                     bool add_remove = true);
 
