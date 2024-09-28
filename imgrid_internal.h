@@ -599,49 +599,62 @@ static inline T &ObjectPoolFindOrCreateObject(ImObjectPool<T> &objects,
   return objects.Pool[index];
 }
 
+inline ScreenSpacePosition CanvasSpaceToScreenSpace(const ImGridContext &ctx,
+                                                    const ImVec2 &v) {
+  return ScreenSpacePosition{ctx.CanvasOriginScreenSpace + (v)*ctx.Zoom};
+}
+
 static inline ScreenSpaceRect
 GetNodePreviewScreenRect(const ImGridContext &ctx, const ImGridEntry &entry) {
-  // converts from grid coordinates (integer) to the screen coordinates (using
-  // the grid size and node size)
-  const ScreenSpacePosition grid_origin_screen_space(
-      ctx.CanvasOriginScreenSpace);
+  const ImVec2 grid_size(ctx.Style.GridSpacing, ctx.Style.GridSpacing);
 
-  const float grid_size = ctx.Style.GridSpacing;
+  // Calculate node position and size in canvas space
+  ImVec2 node_pos_canvas;
+  ImVec2 node_size_canvas;
 
-  const ImVec2 node_size(entry.Position.w * grid_size,
-                         entry.Position.h * grid_size);
+  node_pos_canvas =
+      ImVec2(entry.Position.x * grid_size.x, entry.Position.y * grid_size.y) +
+      ctx.Panning;
 
-  ScreenSpacePosition node_pos =
-      ImVec2(entry.Position.x * grid_size + ctx.Panning.x,
-             entry.Position.y * grid_size + ctx.Panning.y);
-  return ScreenSpaceRect(grid_origin_screen_space + node_pos,
-                         grid_origin_screen_space + node_pos + node_size);
+  node_size_canvas =
+      ImVec2(entry.Position.w * grid_size.x, entry.Position.h * grid_size.y);
+
+  // Now convert from canvas space to screen space, including zoom
+  ScreenSpacePosition min_screen_pos =
+      CanvasSpaceToScreenSpace(ctx, node_pos_canvas);
+  ScreenSpacePosition max_screen_pos =
+      CanvasSpaceToScreenSpace(ctx, node_pos_canvas + node_size_canvas);
+
+  return ScreenSpaceRect(min_screen_pos, max_screen_pos);
 }
 
 static inline ScreenSpaceRect GetNodeScreenRect(const ImGridContext &ctx,
                                                 const ImGridEntry &entry) {
-  // converts from grid coordinates (integer) to the screen coordinates (using
-  // the grid size and node size)
-  const ScreenSpacePosition grid_origin_screen_space(
-      ctx.CanvasOriginScreenSpace);
-  printf("grid_origin_screen_space: %f, %f\n", grid_origin_screen_space.x,
-         grid_origin_screen_space.y);
+  // Node position in canvas space
+  const ImVec2 grid_size(ctx.Style.GridSpacing, ctx.Style.GridSpacing);
 
-  const float grid_size = ctx.Style.GridSpacing;
+  // Calculate node position and size in canvas space
+  ImVec2 node_pos_canvas;
+  ImVec2 node_size_canvas;
 
-  const ImVec2 node_size(entry.Position.w * grid_size,
-                         entry.Position.h * grid_size);
-
-  ScreenSpacePosition node_pos;
   if (entry.Moving) {
-    node_pos =
-        entry.MovingPosition + ctx.Panning; // - entry.MoveMouseOffsetRel;
+    node_pos_canvas = entry.MovingPosition + ctx.Panning;
   } else {
-    node_pos = ImVec2(entry.Position.x * grid_size + ctx.Panning.x,
-                      entry.Position.y * grid_size + ctx.Panning.y);
+    node_pos_canvas =
+        ImVec2(entry.Position.x * grid_size.x, entry.Position.y * grid_size.y) +
+        ctx.Panning;
   }
-  return ScreenSpaceRect(grid_origin_screen_space + node_pos,
-                         grid_origin_screen_space + node_pos + node_size);
+
+  node_size_canvas = ImVec2(std::floor(entry.Position.w * grid_size.x),
+                            std::floor(entry.Position.h * grid_size.y));
+
+  // Now convert from canvas space to screen space, including zoom
+  ScreenSpacePosition min_screen_pos =
+      CanvasSpaceToScreenSpace(ctx, node_pos_canvas);
+  ScreenSpacePosition max_screen_pos =
+      CanvasSpaceToScreenSpace(ctx, node_pos_canvas + node_size_canvas);
+
+  return ScreenSpaceRect(min_screen_pos, max_screen_pos);
 }
 
 static inline void UpdateNodeGridSpaceSize(ImGridContext &ctx,
@@ -650,9 +663,8 @@ static inline void UpdateNodeGridSpaceSize(ImGridContext &ctx,
                                            float height_pixels) {
   // converts from screen space item width/height to grid coordinates w, h
   const float grid_size = ctx.Style.GridSpacing;
-  entry.Position.w = std::max(1.0f, std::ceilf((width_pixels / grid_size) + 1));
-  entry.Position.h =
-      std::max(1.0f, std::ceilf((height_pixels / grid_size) + 1));
+  entry.Position.w = std::max(1.0f, std::ceilf((width_pixels / grid_size)));
+  entry.Position.h = std::max(1.0f, std::ceilf((height_pixels / grid_size)));
 }
 
 } // namespace ImGrid

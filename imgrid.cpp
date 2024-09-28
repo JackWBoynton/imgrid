@@ -72,11 +72,6 @@ inline ImRect GetItemRectInternal() {
   return ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
 }
 
-inline ScreenSpacePosition CanvasSpaceToScreenSpace(const ImGridContext &ctx,
-                                                    const ImVec2 &v) {
-  return ScreenSpacePosition{ctx.CanvasOriginScreenSpace + (v)*ctx.Zoom};
-}
-
 [[maybe_unused]] inline ImRect GetItemRect() {
   // Retrieve the current item rectangle and its size
   ImRect rect = GetItemRectInternal();
@@ -329,7 +324,8 @@ void BeginCanvasInteraction() {
     GImGrid->ClickInteraction.BoxSelector.Rect.Min = GImGrid->MousePos;
   }
 
-  if (GImGrid->CtrlKeyHeld && GImGrid->MouseWheelDelta != 0.0f) {
+  if (GImGrid->MouseWheelDelta != 0.0f) {
+    printf("Zooming\n");
     float zoom_increment = 0.1f;
     float new_zoom = GImGrid->Zoom + GImGrid->MouseWheelDelta * zoom_increment;
     GImGrid->Zoom =
@@ -879,25 +875,40 @@ ImOptionalIndex ResolveHoveredEntry(const ImVector<int> &depth_stack,
 }
 
 void DrawGrid(ImGridContext &ctx, const ImVec2 &canvas_size) {
-  const ImVec2 offset = ctx.Panning;
-  ImU32 line_color = ctx.Style.Colors[ImGridCol_GridLine];
-  ImU32 line_color_prim = ctx.Style.Colors[ImGridCol_GridLinePrimary];
-  bool draw_primary = ctx.Style.Flags & ImGridStyleFlags_GridLinesPrimary;
+  // Get the canvas origin in screen space
+  ImVec2 grid_origin = ctx.CanvasOriginScreenSpace;
 
-  for (float x = fmodf(offset.x, ctx.Style.GridSpacing); x < canvas_size.x;
-       x += ctx.Style.GridSpacing) {
-    ctx.CanvasDrawList->AddLine(
-        CanvasSpaceToScreenSpace(ctx, ImVec2(x, 0.0f)),
-        CanvasSpaceToScreenSpace(ctx, ImVec2(x, canvas_size.y)),
-        offset.x - x == 0.f && draw_primary ? line_color_prim : line_color);
+  // Adjusted grid spacing with zoom
+  float grid_spacing = ctx.Style.GridSpacing * ctx.Zoom;
+
+  // Adjusted panning offset with zoom
+  ImVec2 offset = ctx.Panning * ctx.Zoom;
+
+  ImU32 line_color = ctx.Style.Colors[ImGridCol_GridLine];
+
+  // Calculate starting positions, ensuring they are positive
+  float x0 = fmodf(offset.x, grid_spacing);
+  if (x0 < 0.0f)
+    x0 += grid_spacing;
+
+  float y0 = fmodf(offset.y, grid_spacing);
+  if (y0 < 0.0f)
+    y0 += grid_spacing;
+
+  // Draw vertical grid lines
+  for (float x = x0; x < canvas_size.x; x += grid_spacing) {
+    float line_x = grid_origin.x + x;
+    ctx.CanvasDrawList->AddLine(ImVec2(line_x, grid_origin.y),
+                                ImVec2(line_x, grid_origin.y + canvas_size.y),
+                                line_color);
   }
 
-  for (float y = fmodf(offset.y, ctx.Style.GridSpacing); y < canvas_size.y;
-       y += ctx.Style.GridSpacing) {
-    ctx.CanvasDrawList->AddLine(
-        CanvasSpaceToScreenSpace(ctx, ImVec2(0.0f, y)),
-        CanvasSpaceToScreenSpace(ctx, ImVec2(canvas_size.x, y)),
-        offset.y - y == 0.f && draw_primary ? line_color_prim : line_color);
+  // Draw horizontal grid lines
+  for (float y = y0; y < canvas_size.y; y += grid_spacing) {
+    float line_y = grid_origin.y + y;
+    ctx.CanvasDrawList->AddLine(ImVec2(grid_origin.x, line_y),
+                                ImVec2(grid_origin.x + canvas_size.x, line_y),
+                                line_color);
   }
 
   // add any previews
@@ -1309,6 +1320,35 @@ void EndEntryTitleBar() {
   // ImGui::SetCursorPos(GetNodeScreenRect(*GImGrid, entry).Min);
 }
 
+void GridSizeConstraintCallback(ImGuiSizeCallbackData *data) {
+  // Get grid spacing and padding from user data
+  struct GridConstraintData {
+    float GridSpacing;
+    ImVec2 Padding;
+  };
+  GridConstraintData *constraint_data = (GridConstraintData *)data->UserData;
+
+  float grid_spacing = constraint_data->GridSpacing;
+  ImVec2 padding =
+      constraint_data->Padding * 2.0f; // Total padding (left+right, top+bottom)
+
+  // Adjust the desired size to include padding
+  ImVec2 size_with_padding = data->DesiredSize + padding;
+
+  // Snap size_with_padding to grid multiples
+  size_with_padding.x =
+      grid_spacing * roundf(size_with_padding.x / grid_spacing);
+  size_with_padding.y =
+      grid_spacing * roundf(size_with_padding.y / grid_spacing);
+
+  // Ensure a minimum size
+  size_with_padding.x = ImMax(size_with_padding.x, grid_spacing);
+  size_with_padding.y = ImMax(size_with_padding.y, grid_spacing);
+
+  // Adjust desired size to exclude padding
+  data->DesiredSize = size_with_padding - padding;
+}
+
 void BeginEntry(const int entry_id) {
   // Must call BeginGrid() before BeginEntry()
   IM_ASSERT(GImGrid->CurrentScope == ImGridScope_Grid);
@@ -1339,13 +1379,60 @@ void BeginEntry(const int entry_id) {
   entry.LayoutStyle.Padding = GImGrid->Style.EntryPadding;
   entry.LayoutStyle.BorderThickness = GImGrid->Style.EntryBorderThickness;
 
-  ImGui::SetCursorPos(GetNodeScreenRect(*GImGrid, entry).Min);
+  // main content placement
+  ImVec2 window_pos = ImGui::GetWindowPos();
+  ImVec2 local_pos = GetNodeScreenRect(*GImGrid, entry).Min - window_pos +
+                     entry.LayoutStyle.Padding;
+  ImGui::SetCursorPos(local_pos);
 
   DrawListAddEntry(entry_idx);
   DrawListActivateCurrentEntryForeground();
 
+  auto entry_content_size = GetNodeScreenRect(*GImGrid, entry).GetSize();
+  if (entry_content_size.x <= GImGrid->Style.GridSpacing ||
+      entry_content_size.y <= GImGrid->Style.GridSpacing) {
+    entry_content_size = ImVec2(200, 200);
+  }
+  entry_content_size = (entry_content_size - entry.LayoutStyle.Padding * 2.0f);
+
+  // Prepare constraint data
+  struct GridConstraintData {
+    float GridSpacing;
+    ImVec2 Padding;
+  };
+  GridConstraintData constraint_data = {GImGrid->Style.GridSpacing,
+                                        entry.LayoutStyle.Padding};
+
   ImGui::PushID(entry.Id);
   ImGui::BeginGroup();
+
+  ImGui::SetWindowFontScale(GImGrid->Zoom);
+
+  // Set size constraints for the child window
+  // Set size constraints for the child window
+  ImGui::SetNextWindowSizeConstraints(
+      ImVec2(constraint_data.GridSpacing - constraint_data.Padding.x * 2.0f,
+             constraint_data.GridSpacing -
+                 constraint_data.Padding.y * 2.0f), // Minimum size
+      ImVec2(FLT_MAX, FLT_MAX),                     // Maximum size
+      GridSizeConstraintCallback,                   // Custom resize callback
+      (void *)&constraint_data // User data (grid spacing and padding)
+  );
+  ImU32 entry_background = entry.ColorStyle.Background;
+
+  const bool entry_hovered = GImGrid->HoveredEntryIdx == entry_idx;
+
+  if (GImGrid->SelectedEntryIndices.contains(entry_idx))
+    entry_background = entry.ColorStyle.BackgroundSelected;
+  else if (entry_hovered)
+    entry_background = entry.ColorStyle.BackgroundHovered;
+
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, entry_background);
+  ImGui::BeginChild("EntryContent", entry_content_size,
+                    ImGuiChildFlags_ResizeX | ImGuiChildFlags_ResizeY |
+                        ImGuiChildFlags_AlwaysUseWindowPadding,
+                    ImGuiWindowFlags_NoScrollWithMouse |
+                        ImGuiWindowFlags_NoScrollbar);
 }
 
 bool GridContainsEntry(ImGridContext *ctx, ImGridEntry *entry) {
@@ -1363,8 +1450,14 @@ void EndEntry() {
   // Hack to force the size to be multiples of grid size
   ImGridEntry &entry = GImGrid->Entries.Pool[GImGrid->CurrentEntryIdx];
 
+  ImGui::EndChild();
+  ImGui::PopStyleColor();
+
   ImGui::EndGroup();
   ImGui::PopID();
+
+  // Reset font scale
+  ImGui::SetWindowFontScale(1.0f);
 
   auto entry_rect = GetItemRect();
   // add grid width/height to the entry

@@ -224,4 +224,18 @@ bool GridContainsEntry(ImGridContext *ctx, ImGridEntry *entry);
 void InsertNewEntry(ImGridContext *ctx, ImGridEntry *node,
                     bool add_remove = true);
 
+const char *SaveCurrentGridStateToIniString(size_t *data_size = NULL);
+const char *SaveGridStateToIniString(const ImGridContext *ctx,
+                                     size_t *data_size = NULL);
+
+void LoadCurrentGridStateFromIniString(const char *data, size_t data_size);
+void LoadGridStateFromIniString(ImGridContext *ctx, const char *data,
+                                size_t data_size);
+
+void SaveCurrentGridStateToIniFile(const char *file_name);
+void SaveGridStateToIniFile(const ImGridContext *ctx, const char *file_name);
+
+void LoadCurrentGridStateFromIniFile(const char *file_name);
+void LoadGridStateFromIniFile(ImGridContext *ctx, const char *file_name);
+
 } // namespace ImGrid

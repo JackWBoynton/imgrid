@@ -21,6 +21,7 @@
 #include "implot_demo.cpp"
 
 #include "imgrid.h"
+#include "imgrid_internal.h"
 
 #include <map>
 #include <stdio.h>
@@ -100,10 +101,10 @@ bool GuageColorMap::Render() {
   return set;
 }
 
-bool SimpleGuage(const char *label, float value, float min, float max,
-                 GuageColorMap &colorMap, const char *format = "%.2f",
-                 float radius = 50, float thickness = 10,
-                 float start_angle = 0.75f, float end_angle = 2.25f,
+bool SimpleGauge(const char *label, float value, float min, float max,
+                 GuageColorMap &colorMap, const ImVec2 &available_size,
+                 const char *format = "%.2f", float start_angle = 0.75f,
+                 float end_angle = 2.25f,
                  float threshold_indicator_div = 6.0f) {
   ImGuiWindow *window = ImGui::GetCurrentWindow();
   if (window->SkipItems)
@@ -116,21 +117,24 @@ bool SimpleGuage(const char *label, float value, float min, float max,
 
   const ImVec2 pos = window->DC.CursorPos;
 
-  // bool needs_wrap = label_size.x > radius * 2 - style.FramePadding.x * 2;
+  // Calculate radius based on available size
+  float min_dimension = ImMin(available_size.x, available_size.y);
+  float radius = (min_dimension - style.FramePadding.x * 2) / 2.0f;
 
-  // if (needs_wrap) {
-  //   label_size.y += (int)(label_size.x / (radius * 2)) * CalcTextSize("A").y;
-  // }
+  // Calculate thickness proportionally (using the same ratio as before)
+  float thickness = radius * 0.2f; // Original ratio was 10 / 50 = 0.2
 
-  const ImRect total_bb(pos,
-                        pos + ImVec2(radius * 2, radius * 2) +
-                            ImVec2(0, label_size.y + style.FramePadding.y) +
-                            style.FramePadding * 2);
+  // Define the total bounding box
+  const ImVec2 total_size = ImVec2(radius * 2, radius * 2) +
+                            ImVec2(0, label_size.y + style.FramePadding.y * 2);
+  const ImRect total_bb(pos, pos + total_size);
+
   ImGui::ItemSize(total_bb, style.FramePadding.y);
   if (!ImGui::ItemAdd(total_bb, id)) {
     return false;
   }
 
+  // Handle interactions
   bool hovered, held;
   bool pressed = ImGui::ButtonBehavior(total_bb, id, &hovered, &held,
                                        ImGuiButtonFlags_MouseButtonRight);
@@ -140,18 +144,21 @@ bool SimpleGuage(const char *label, float value, float min, float max,
     ImGui::OpenPopup("ColorMap Popup", ImGuiPopupFlags_AnyPopup);
   }
 
-  auto label_pos =
-      total_bb.GetTL() +
-      ImVec2((total_bb.GetWidth() - label_size.x) / 2, style.FramePadding.y);
+  // Calculate positions
+  ImVec2 label_pos =
+      total_bb.Min +
+      ImVec2((total_bb.GetWidth() - label_size.x) / 2.0f, style.FramePadding.y);
 
-  // add the label above the guage in the center
+  // Draw label above the gauge in the center
   window->DrawList->AddText(label_pos, ImColor(style.Colors[ImGuiCol_Text]),
                             label);
-  const auto center =
+
+  // Calculate the center of the gauge
+  ImVec2 center =
       total_bb.GetCenter() + ImVec2(0, label_size.y + style.ItemInnerSpacing.y);
 
-  // lambda to convert from value to angle ( corrected for the start of 0.75 and
-  // end of 2.25 )
+  // Lambda to convert from value to angle (corrected for the start and end
+  // angles)
   auto lerper = [&](float val) {
     return start_angle * IM_PI +
            (val - min) / (max - min) * (end_angle - start_angle) * IM_PI;
@@ -160,32 +167,34 @@ bool SimpleGuage(const char *label, float value, float min, float max,
   auto color_ring_thickness = thickness / threshold_indicator_div;
   auto color_ring_radius = radius;
 
-  // add the colors
+  // Draw color rings
   float current_angle = start_angle * IM_PI;
   for (const auto &[key, color] : colorMap.Map) {
     float next_angle = lerper(key);
     window->DrawList->PathClear();
     window->DrawList->PathArcTo(center, color_ring_radius, current_angle,
-                                next_angle);
+                                next_angle, 64);
     window->DrawList->PathStroke(color, ImDrawFlags_None, color_ring_thickness);
     current_angle = next_angle;
   }
 
-  // add the background of the guage
+  // Draw background of the gauge
   auto value_ring_radius =
-      radius - color_ring_thickness * 3.0f - radius / (16.0f);
+      radius - color_ring_thickness * 3.0f - radius / 16.0f;
   window->DrawList->PathClear();
   window->DrawList->PathArcTo(center, value_ring_radius, start_angle * IM_PI,
-                              end_angle * IM_PI);
+                              end_angle * IM_PI, 64);
   window->DrawList->PathStroke(ImColor(style.Colors[ImGuiCol_MenuBarBg]),
                                ImDrawFlags_None, thickness);
 
-  // add the current values bar of the correct color and angle
+  // Draw current value arc
   float current_angle_value =
       std::max(start_angle * IM_PI, std::min(end_angle * IM_PI, lerper(value)));
   window->DrawList->PathClear();
   window->DrawList->PathArcTo(center, value_ring_radius, start_angle * IM_PI,
-                              current_angle_value);
+                              current_angle_value, 64);
+
+  // Determine value color
   ImU32 value_color = 0;
   ImU32 last_color = 0;
   for (const auto &[key, color] : colorMap.Map) {
@@ -200,16 +209,16 @@ bool SimpleGuage(const char *label, float value, float min, float max,
   }
   window->DrawList->PathStroke(value_color, ImDrawFlags_None, thickness);
 
-  // add a white line at the end of the value to make it look like a needle
+  // Draw a white line at the end of the value to make it look like a needle
   auto value_ring_thickness = thickness + 1.0f;
   window->DrawList->PathClear();
   window->DrawList->PathArcTo(center, value_ring_radius,
                               current_angle_value - 0.01f * IM_PI / 2,
-                              current_angle_value + 0.01f * IM_PI / 2);
+                              current_angle_value + 0.01f * IM_PI / 2, 64);
   window->DrawList->PathStroke(ImColor(ImVec4(1, 1, 1, 1)), ImDrawFlags_None,
                                value_ring_thickness);
 
-  // add the value in the middle of the guage
+  // Draw the value in the middle of the gauge
   char buffer[64];
   snprintf(buffer, sizeof(buffer), format, value);
   const ImVec2 value_size = ImGui::CalcTextSize(buffer, nullptr, true);
@@ -354,8 +363,6 @@ int main(int, char **) {
 
     ImGui::SetNextWindowSize(ImVec2(400, 400), ImGuiCond_FirstUseEver);
     [[maybe_unused]] static float f = 0;
-    static float radius = 100.0f;
-    static float thickness = 10.0f;
     ImGrid::PushStyleVar(ImGridStyleVar_GridSpacing, 70.0f);
     if (ImGui::Begin("Grid")) {
 
@@ -385,65 +392,63 @@ int main(int, char **) {
           ImGui::Text("Entry %d", i);
           ImGrid::EndEntryTitleBar();
           ImGui::Text("Entry %d content", i);
+          ImVec2 available_size = ImGui::GetContentRegionAvail();
 
-          ImGui::SetNextItemWidth(100);
+          ImGui::SetNextItemWidth(available_size.x);
           ImGui::SliderFloat("float", &f, 0.0f, 100.0f);
-          ImGui::SetNextItemWidth(100);
-          ImGui::SliderFloat("radius", &radius, 0.0f, 300.0f);
-          ImGui::SetNextItemWidth(100);
-          ImGui::SliderFloat("thickness", &thickness, 0.0f, 50.0f);
+          // Get the available size within the entry
 
-          SimpleGuage("Guage", f, 0.0f, 100.0f, colorMap, "%.2f", radius,
-                      thickness);
+          // Ensure a minimum size for the gauge
+          ImVec2 gauge_size = ImVec2(ImMin(available_size.x, available_size.y),
+                                     ImMin(available_size.x, available_size.y));
+
+          // Center the gauge within the entry
+          ImGui::SetCursorPosX((available_size.x - gauge_size.x) / 2.0f);
+
+          SimpleGauge("Guage", f, 0.0f, 100.0f, colorMap, gauge_size, "%.2f");
         }
         ImGrid::EndEntry();
       }
 
-      // for (; i < 5; i++) {
-      //   ImGrid::BeginEntry(i);
-      //   {
-      //     ImGrid::BeginEntryTitleBar();
-      //     ImGui::Text("Entry %d", i);
-      //     ImGrid::EndEntryTitleBar();
-      //     ImGui::Text("Entry %d content", i);
+      for (; i < 5; i++) {
+        ImGrid::BeginEntry(i);
+        {
+          ImGrid::BeginEntryTitleBar();
+          ImGui::Text("Entry %d", i);
+          ImGrid::EndEntryTitleBar();
+          ImGui::Text("Entry %d content", i);
 
-      //    ImPlot::PushStyleVar(ImPlotStyleVar_PlotDefaultSize,
-      //                         ImVec2(300, 300));
-      //    ImPlot::Demo_LinePlots();
-      //    ImPlot::PopStyleVar();
-      //  }
-      //  ImGrid::EndEntry();
-      //}
+          ImPlot::Demo_LinePlots();
+        }
+        ImGrid::EndEntry();
+      }
 
-      // for (; i < 6; i++) {
-      //   ImGrid::BeginEntry(i);
-      //   {
-      //     ImGrid::BeginEntryTitleBar();
-      //     ImGui::Text("Entry %d", i);
-      //     ImGrid::EndEntryTitleBar();
-      //     ImGui::Text("Entry %d content", i);
+      for (; i < 6; i++) {
+        ImGrid::BeginEntry(i);
+        {
+          ImGrid::BeginEntryTitleBar();
+          ImGui::Text("Entry %d", i);
+          ImGrid::EndEntryTitleBar();
+          ImGui::Text("Entry %d content", i);
 
-      //    ImPlot::PushStyleVar(ImPlotStyleVar_PlotDefaultSize,
-      //                         ImVec2(400, 200));
-      //    ImPlot::Demo_RealtimePlots();
-      //    ImPlot::PopStyleVar();
-      //  }
-      //  ImGrid::EndEntry();
-      //}
-      // for (; i < 8; i++) {
-      //  ImGrid::BeginEntry(i);
-      //  {
-      //    ImGrid::BeginEntryTitleBar();
-      //    ImGui::Text("Entry %d", i);
-      //    ImGrid::EndEntryTitleBar();
-      //    ImGui::Text("Entry %d content", i);
+          ImPlot::Demo_RealtimePlots();
+        }
+        ImGrid::EndEntry();
+      }
+      for (; i < 8; i++) {
+        ImGrid::BeginEntry(i);
+        {
+          ImGrid::BeginEntryTitleBar();
+          ImGui::Text("Entry %d", i);
+          ImGrid::EndEntryTitleBar();
+          ImGui::Text("Entry %d content", i);
 
-      //    ImGui::PushFont(big_font);
-      //    ImGui::Text("%f", f);
-      //    ImGui::PopFont();
-      //  }
-      //  ImGrid::EndEntry();
-      //}
+          ImGui::PushFont(big_font);
+          ImGui::Text("%f", f);
+          ImGui::PopFont();
+        }
+        ImGrid::EndEntry();
+      }
       for (; i < 8; i++) {
         ImGrid::BeginEntry(i);
         {
