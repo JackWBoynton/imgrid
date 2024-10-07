@@ -1442,6 +1442,20 @@ bool GridContainsEntry(ImGridContext *ctx, ImGridEntry *entry) {
   return entry->ParentContext != NULL;
 }
 
+bool IsNodeSelected(int id) {
+  return GImGrid->SelectedEntryIndices.contains(id);
+}
+
+ImGridPosition GetEntryPosition(int id) {
+  auto idx = ObjectPoolFindOrCreateIndex(GImGrid->Entries, id);
+  return GImGrid->Entries.Pool[idx].Position;
+}
+
+void SetEntryPosition(int id, ImGridPosition position) {
+  auto idx = ObjectPoolFindOrCreateIndex(GImGrid->Entries, id);
+  GImGrid->Entries.Pool[idx].Position = position;
+}
+
 void EndEntry() {
 
   IM_ASSERT(GImGrid->CurrentScope == ImGridScope_Entry);

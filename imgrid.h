@@ -210,6 +210,10 @@ bool IsEntryHovered(int *entry_id);
 void RenderDebug();
 
 // Public Grid API
+ImGridPosition GetEntryPosition(int id);
+void SetEntryPosition(int id, ImGridPosition pos);
+
+bool IsNodeSelected(int id);
 void MoveNode(ImGridContext &ctx, ImGridEntry *entry, ImGridMoveOptions opts);
 void UpdateContainerHeight(ImGridContext *ctx);
 void DoResizeToContentCheck(ImGridContext *ctx, bool delay = false,
