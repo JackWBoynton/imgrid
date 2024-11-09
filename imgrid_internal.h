@@ -10,8 +10,10 @@
 #include <limits.h>
 #include <map>
 
-#define IM_MIN(x, y) x > y ? y : x
-#define IM_MAX(x, y) x > y ? x : y
+#define IM_MIN(x, y) (x) > (y) ? (y) : (x)
+#define IM_MAX(x, y) (x) > (y) ? (x) : (y)
+#define IM_CEIL(x) (float)(int)((x) + 0.999999f)
+#define IM_FLOOR(x) (float)(int)(x)
 
 struct ImGridContext;
 
@@ -663,8 +665,8 @@ static inline void UpdateNodeGridSpaceSize(ImGridContext &ctx,
                                            float height_pixels) {
   // converts from screen space item width/height to grid coordinates w, h
   const float grid_size = ctx.Style.GridSpacing;
-  entry.Position.w = std::max(1.0f, std::ceilf((width_pixels / grid_size)));
-  entry.Position.h = std::max(1.0f, std::ceilf((height_pixels / grid_size)));
+  entry.Position.w = std::max(1.0f, IM_CEIL((width_pixels / grid_size)));
+  entry.Position.h = std::max(1.0f, IM_CEIL((height_pixels / grid_size)));
 }
 
 } // namespace ImGrid
