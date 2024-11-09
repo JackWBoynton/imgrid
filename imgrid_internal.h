@@ -10,10 +10,9 @@
 #include <limits.h>
 #include <map>
 
-#define IM_MIN(x, y) (x) > (y) ? (y) : (x)
-#define IM_MAX(x, y) (x) > (y) ? (x) : (y)
-#define IM_CEIL(x) (float)(int)((x) + 0.999999f)
-#define IM_FLOOR(x) (float)(int)(x)
+#define IM_MIN(x, y) ((x) > (y) ? (y) : (x))
+#define IM_MAX(x, y) ((x) > (y) ? (x) : (y))
+#define IM_CEIL(x) ((float)(int)((x) + 0.999999f))
 
 struct ImGridContext;
 
